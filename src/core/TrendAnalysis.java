@@ -17,5 +17,5 @@ public final class TrendAnalysis {
 		table.add(mean);
 		table.add(standardDeviation);
 	}
-	
+	test
 }
