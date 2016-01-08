@@ -30,6 +30,7 @@ dist_noinst_SCRIPTS = src/create_table.sh src/upgrade_1to2.sh src/mygnuplot.sh \
 dist_noinst_DATA = pom.xml.in build-aux/rpm/opentsdb.conf \
   build-aux/rpm/logback.xml build-aux/rpm/init.d/opentsdb
 tsdb_SRC := \
+        src/core/TrendAnalysis.java     \
 	src/core/AggregationIterator.java	\
 	src/core/Aggregator.java	\
 	src/core/Aggregators.java	\
