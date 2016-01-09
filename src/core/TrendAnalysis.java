@@ -12,7 +12,7 @@ import com.stumbleupon.async.Deferred;
 
 public class TrendAnalysis {
 	
-	private static HBaseClient client;
+	private final static HBaseClient client;
 	private final Config config;
 	private static byte[] table;
 	private static final byte[] FAMILY = { 't' };
@@ -33,19 +33,34 @@ public class TrendAnalysis {
 	}
 	
 	private static void initializeRows() {
-		KeyValue keyValue = null;
+		KeyValue mean = null;
+		KeyValue standardDev = null;
 		// Add rows for each hour of each day of the week
 		int[] weekdays = {1, 2, 3, 4, 5, 6, 7};
 		for(int day : weekdays) {
 			for(int i = 0; i < 24; i++) {
 				String rowName = day + "-" + i; // TODO: add metric
 				byte[] row = rowName.getBytes();
-				keyValue = new KeyValue(row, FAMILY, "mean".getBytes(), new byte[0]);
-				PutRequest point = new PutRequest(table, keyValue);
-				client.put(point);
+				mean = new KeyValue(row, FAMILY, "mean".getBytes(), new byte[0]);
+				standardDev = new KeyValue(row, FAMILY, "standard_deviation".getBytes(), new byte[0]);
+				PutRequest meanData = new PutRequest(table, mean);
+				PutRequest standardDevData = new PutRequest(table, standardDev);
+				client.put(meanData);
+				client.put(standardDevData);
 			}
 		}
 	}
+	
+	/**
+	 * Alternate constructor
+	 * @param config An initialized configuration object
+	 */
+	public TrendAnalysis(final Config config) {
+	    this(new HBaseClient(config.getString("tsd.storage.hbase.zk_quorum"),
+	                         config.getString("tsd.storage.hbase.zk_basedir")),
+	         config);
+	  }
+	  
 	
 	private void updateMetric(){
 		

@@ -12,26 +12,25 @@
 // see <http://www.gnu.org/licenses/>.
 package net.opentsdb.tools;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.concurrent.Executors;
 
+import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.channel.socket.ServerSocketChannelFactory;
+import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
 import org.jboss.netty.channel.socket.oio.OioServerSocketChannelFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.jboss.netty.bootstrap.ServerBootstrap;
-import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
 
+import core.TrendAnalysis;
 import net.opentsdb.BuildData;
-import net.opentsdb.core.TSDB;
 import net.opentsdb.core.Const;
+import net.opentsdb.core.TSDB;
 import net.opentsdb.tsd.PipelineFactory;
 import net.opentsdb.utils.Config;
 import net.opentsdb.utils.FileSystem;
-import net.opentsdb.graph.Plot;
 /**
  * Main class of the TSD, the Time Series Daemon.
  */
@@ -137,8 +136,10 @@ final class TSDMain {
     }
     
     TSDB tsdb = null;
+    TrendAnalysis trendAnalysis = null;
     try {
       tsdb = new TSDB(config);
+      trendAnalysis = new TrendAnalysis(config);
       tsdb.initializePlugins(true);
       
       // Make sure we don't even start if we can't find our tables.
