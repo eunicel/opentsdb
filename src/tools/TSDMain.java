@@ -24,13 +24,13 @@ import org.jboss.netty.channel.socket.oio.OioServerSocketChannelFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import core.TrendAnalysis;
 import net.opentsdb.BuildData;
 import net.opentsdb.core.Const;
 import net.opentsdb.core.TSDB;
 import net.opentsdb.tsd.PipelineFactory;
 import net.opentsdb.utils.Config;
 import net.opentsdb.utils.FileSystem;
+import net.opentsdb.core.TrendAnalysis;
 /**
  * Main class of the TSD, the Time Series Daemon.
  */

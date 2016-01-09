@@ -7,15 +7,20 @@ import net.opentsdb.utils.Config;
 import org.hbase.async.HBaseClient;
 import org.hbase.async.KeyValue;
 import org.hbase.async.PutRequest;
+import org.slf4j.LoggerFactory;
 
 import com.stumbleupon.async.Deferred;
 
+import org.slf4j.Logger;
+
 public class TrendAnalysis {
 	
-	private final static HBaseClient client;
+	private static HBaseClient client;
 	private final Config config;
 	private static byte[] table;
 	private static final byte[] FAMILY = { 't' };
+	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
+	
 	
 	/**
 	 * Creates a trends table in HBase that stores the mean
@@ -24,7 +29,8 @@ public class TrendAnalysis {
 	 * @param args
 	 * @throws IOException
 	 */
-	public TrendAnalysis(final HBaseClient client, final Config config){
+	public TrendAnalysis(HBaseClient client, final Config config){
+		log.info("in TrendAnalysis constructor");
 		this.client = client;
 		this.config = config;
 		String tableName = "trends";
@@ -33,6 +39,7 @@ public class TrendAnalysis {
 	}
 	
 	private static void initializeRows() {
+		log.info("start initializing rows");
 		KeyValue mean = null;
 		KeyValue standardDev = null;
 		// Add rows for each hour of each day of the week
@@ -49,6 +56,7 @@ public class TrendAnalysis {
 				client.put(standardDevData);
 			}
 		}
+		log.info("done initializing rows");
 	}
 	
 	/**
