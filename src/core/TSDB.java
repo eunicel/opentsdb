@@ -583,6 +583,9 @@ public final class TSDB {
                                    final long timestamp,
                                    final long value,
                                    final Map<String, String> tags) {
+    final Logger LOG = LoggerFactory.getLogger(TSDB.class);
+
+	LOG.info("addPoint!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     final byte[] v;
     if (Byte.MIN_VALUE <= value && value <= Byte.MAX_VALUE) {
       v = new byte[] { (byte) value };

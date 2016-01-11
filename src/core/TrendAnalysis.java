@@ -46,6 +46,7 @@ public class TrendAnalysis {
 		int[] weekdays = {1, 2, 3, 4, 5, 6, 7};
 		for(int day : weekdays) {
 			for(int i = 0; i < 24; i++) {
+				log.info("row " + day + ", " + i);
 				String rowName = day + "-" + i; // TODO: add metric
 				byte[] row = rowName.getBytes();
 				mean = new KeyValue(row, FAMILY, "mean".getBytes(), new byte[0]);
