@@ -1,6 +1,12 @@
 package net.opentsdb.core;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import net.opentsdb.utils.Config;
 
@@ -20,7 +26,7 @@ public class TrendAnalysis {
 	private static byte[] table;
 	private static final byte[] FAMILY = { 't' };
 	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
-	
+	private Set<String> metrics;
 	
 	/**
 	 * Creates a trends table in HBase that stores the mean
@@ -33,14 +39,18 @@ public class TrendAnalysis {
 		log.info("in TrendAnalysis constructor");
 		this.client = client;
 		this.config = config;
+		metrics = new HashSet<String>();
 		String tableName = "trends";
 		table = tableName.getBytes();
-		
-		initializeRows();
 	}
 	
-	private static void initializeRows() {
-		log.info("start initializing rows");
+	/**
+	 * Adds all the rows needed to store trends for this metric.
+	 * Creates a row for each hour of each day of the week for this metric.
+	 * @param metric
+	 */
+	private static void addMetric(String metric) {
+		log.info("start initializing rows for metric " + metric);
 		KeyValue mean = null;
 		KeyValue standardDev = null;
 		// Add rows for each hour of each day of the week
@@ -48,7 +58,7 @@ public class TrendAnalysis {
 		for(int day : weekdays) {
 			for(int i = 0; i < 24; i++) {
 				log.info("row " + day + ", " + i);
-				String rowName = day + "-" + i; // TODO: add metric
+				String rowName = metric + "-" + day + "-" + i;
 				byte[] row = rowName.getBytes();
 				mean = new KeyValue(row, FAMILY, "mean".getBytes(), new byte[0]);
 				standardDev = new KeyValue(row, FAMILY, "standard_deviation".getBytes(), new byte[0]);
@@ -75,14 +85,19 @@ public class TrendAnalysis {
 	                         config.getString("tsd.storage.hbase.zk_basedir")),
 	         config);
 	  }
-	  
 	
-	private void updateMetric(){
-		
-	}
-	
-	private static void getMetrics() {
-		
+	private void addPoint(String metric, long timestamp, long value, Map<String, String> tags) {
+		ArrayList<String> tagsList = new ArrayList<String>(tags.keySet());
+		Collections.sort(tagsList);
+		String metricAndTags = metric;
+		for(String tag : tagsList) {
+			metricAndTags = metricAndTags + "-" + tag;
+		}
+		if(metrics.contains(metricAndTags)) {
+			// update mean and standard deviation
+		} else {
+			addMetric(metricAndTags);
+		}
 	}
 	
 	
