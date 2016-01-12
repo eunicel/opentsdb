@@ -35,6 +35,7 @@ public class TrendAnalysis {
 		this.config = config;
 		String tableName = "trends";
 		table = tableName.getBytes();
+		
 		initializeRows();
 	}
 	
@@ -56,6 +57,11 @@ public class TrendAnalysis {
 				client.put(meanData);
 				client.put(standardDevData);
 			}
+		}
+		try {
+			client.shutdown().join();
+		} catch (Exception e) {
+			e.printStackTrace();
 		}
 		log.info("done initializing rows");
 	}

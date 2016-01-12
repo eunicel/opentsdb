@@ -626,6 +626,9 @@ public final class TSDB {
                                    final long timestamp,
                                    final double value,
                                    final Map<String, String> tags) {
+    final Logger LOG = LoggerFactory.getLogger(TSDB.class);
+
+    LOG.info("addPoint float!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     if (Double.isNaN(value) || Double.isInfinite(value)) {
       throw new IllegalArgumentException("value is NaN or Infinite: " + value
                                          + " for metric=" + metric
@@ -662,7 +665,11 @@ public final class TSDB {
                                    final long timestamp,
                                    final float value,
                                    final Map<String, String> tags) {
-    if (Float.isNaN(value) || Float.isInfinite(value)) {
+	final Logger LOG = LoggerFactory.getLogger(TSDB.class);
+
+	LOG.info("addPoint single!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
+	if (Float.isNaN(value) || Float.isInfinite(value)) {
       throw new IllegalArgumentException("value is NaN or Infinite: " + value
                                          + " for metric=" + metric
                                          + " timestamp=" + timestamp);
@@ -678,7 +685,11 @@ public final class TSDB {
                                             final byte[] value,
                                             final Map<String, String> tags,
                                             final short flags) {
-    // we only accept positive unix epoch timestamps in seconds or milliseconds
+	final Logger LOG = LoggerFactory.getLogger(TSDB.class);
+
+	LOG.info("add point internal!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
+	// we only accept positive unix epoch timestamps in seconds or milliseconds
     if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 && 
         timestamp > 9999999999999L)) {
       throw new IllegalArgumentException((timestamp < 0 ? "negative " : "bad")

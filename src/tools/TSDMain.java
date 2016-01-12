@@ -138,12 +138,12 @@ final class TSDMain {
     }
     
     TSDB tsdb = null;
-    //TrendAnalysis trendAnalysis = null;
-    //log.info("TrendAnalysis initialized to null");
+    TrendAnalysis trendAnalysis = null;
+    log.info("TrendAnalysis initialized to null");
     try {
       tsdb = new TSDB(config);
-      //trendAnalysis = new TrendAnalysis(config);
-      //log.info("TrendAnalysis object created");
+      trendAnalysis = new TrendAnalysis(config);
+      log.info("TrendAnalysis object created");
       tsdb.initializePlugins(true);
       
       // Make sure we don't even start if we can't find our tables.
