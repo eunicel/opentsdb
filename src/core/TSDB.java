@@ -95,7 +95,7 @@ public final class TSDB {
   final Config config;
   
   /** Trend analysis */
-  TrendAnalysis trendAnalysis = null;
+  private TrendAnalysis trendAnalysis = null;
 
   /**
    * Row keys that need to be compacted.
@@ -593,6 +593,7 @@ public final class TSDB {
     final Logger LOG = LoggerFactory.getLogger(TSDB.class);
 
 	LOG.info("addPoint!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+	trendAnalysis.addPoint(metric, timestamp, value, tags);
     final byte[] v;
     if (Byte.MIN_VALUE <= value && value <= Byte.MAX_VALUE) {
       v = new byte[] { (byte) value };
