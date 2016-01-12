@@ -43,6 +43,7 @@ import net.opentsdb.uid.UniqueId.UniqueIdType;
 import net.opentsdb.utils.Config;
 import net.opentsdb.utils.DateTime;
 import net.opentsdb.utils.PluginLoader;
+import net.opentsdb.core.TrendAnalysis;
 import net.opentsdb.meta.Annotation;
 import net.opentsdb.meta.TSMeta;
 import net.opentsdb.meta.UIDMeta;
@@ -70,7 +71,7 @@ public final class TSDB {
   private static final short TAG_NAME_WIDTH = 3;
   private static final String TAG_VALUE_QUAL = "tagv";
   private static final short TAG_VALUE_WIDTH = 3;
-
+  
   /** Client for the HBase cluster to use.  */
   final HBaseClient client;
 
@@ -92,6 +93,11 @@ public final class TSDB {
 
   /** Configuration object for all TSDB components */
   final Config config;
+  
+  Logger log = LoggerFactory.getLogger(TSDB.class);
+
+  /** Trend analysis */
+  TrendAnalysis trendAnalysis = null;
 
   /**
    * Row keys that need to be compacted.
@@ -150,6 +156,9 @@ public final class TSDB {
       UniqueId.preloadUidCache(this, uid_cache_map);
     }
     LOG.debug(config.dumpConfiguration());
+    
+    trendAnalysis = new TrendAnalysis(config);
+    log.info("TrendAnalysis object created");
   }
 
   /**
