@@ -1,6 +1,7 @@
 package net.opentsdb.core;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -29,7 +30,6 @@ public class TrendAnalysis {
 	private static byte[] table;
 	private static final byte[] FAMILY = { 't' };
 	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
-	private static Set<String> metricsAndTags;
 	private static HashMap<String, long[]> allStats;
 	
 	/**
@@ -44,9 +44,6 @@ public class TrendAnalysis {
 		this.client = client;
 		this.config = config;
 		table = "trends".getBytes();
-
-		// a set of metrics-tags
-		metricsAndTags = new HashSet<String>();
 		
 		// mapping of metrics-tags-day-time to an
 		// array of count, mean, and standard deviation
@@ -68,35 +65,33 @@ public class TrendAnalysis {
 	 * Creates a row for each hour of each day of the week for this metric.
 	 * @param metric
 	 */
-	private static void addNewMetric(String newMetricAndTags, long timestamp, long value, Map<String, String> tags) {
+	private static void createNewRowInHBase(String newMetricAndTags,
+			long timestamp, long value, Map<String, String> tags) {
 		log.info("start initializing rows for metric " + newMetricAndTags);
-		
-		metricsAndTags.add(newMetricAndTags);
 		
 		KeyValue mean = null;
 		KeyValue standardDev = null;
 		
-		// Add rows for each hour of each day of the week
-		int[] weekdays = {1, 2, 3, 4, 5, 6, 7};
-		for(int day : weekdays) {
-			for(int i = 0; i < 24; i++) {
-				log.info("row " + day + ", " + i);
-				String rowName = newMetricAndTags + "-" + day + "-" + i;
-				
-				// Store in memory
-				long[] stats = {1, value, 0}; // count, mean, standard deviation
-				allStats.put(rowName, stats);
-				
-				// Store into HBase
-				byte[] row = rowName.getBytes();
-				mean = new KeyValue(row, FAMILY, "mean".getBytes(), new byte[0]);
-				standardDev = new KeyValue(row, FAMILY, "standard_deviation".getBytes(), new byte[0]);
-				PutRequest meanData = new PutRequest(table, mean);
-				PutRequest standardDevData = new PutRequest(table, standardDev);
-				client.put(meanData);
-				client.put(standardDevData);
-			}
-		}
+		String rowName = newMetricAndTags + "-" + getDay(timestamp) + "-" + getHour(timestamp);
+
+		// Store into HBase
+		byte[] row = rowName.getBytes();
+		
+		byte meanBytes[] = new byte[8];
+		ByteBuffer meanBuf = ByteBuffer.wrap(meanBytes);
+		meanBuf.putLong(value);
+		mean = new KeyValue(row, FAMILY, "mean".getBytes(), meanBytes);
+		
+		byte stdevBytes[] = new byte[8];
+		ByteBuffer stdevBuf = ByteBuffer.wrap(stdevBytes);
+		stdevBuf.putLong(0);
+		standardDev = new KeyValue(row, FAMILY, "standard_deviation".getBytes(), new byte[0]);
+		
+		PutRequest meanData = new PutRequest(table, mean);
+		PutRequest standardDevData = new PutRequest(table, standardDev);
+		client.put(meanData);
+		client.put(standardDevData);
+
 		try {
 			client.flush();
 			log.info("flushed");
@@ -104,6 +99,10 @@ public class TrendAnalysis {
 			e.printStackTrace();
 		}
 		log.info("done initializing rows");
+	}
+	
+	private void updateStatsInHBase() {
+		
 	}
 	
 
@@ -120,19 +119,28 @@ public class TrendAnalysis {
 	public void addPoint(String metric,
 			long timestamp, long value, Map<String, String> tags) {
 		log.info("trendAnalysis adding point!!!!!!!!!!!!!! !!!!!!!!");
+		
+		// Create ordered list of tag keys and values
 		ArrayList<String> tagsList = new ArrayList<String>(tags.keySet());
 		Collections.sort(tagsList);
-		String newMetricAndTags = metric;
+		String tagsAndValues = "";
 		for(String tag : tagsList) {
-			newMetricAndTags = newMetricAndTags + "-" + tag;
+			if(tagsAndValues.equals("")) {
+				tagsAndValues = tag + "=" + tags.get(tag);
+			} else {
+				tagsAndValues = tagsAndValues + "-" + tag + "=" + tags.get(tag);
+			}
 		}
-		if(metricsAndTags.contains(newMetricAndTags)) {
-			String rowName = newMetricAndTags + getDay(timestamp) + getHour(timestamp);
+		
+		// Create key
+		String rowName = metric + tagsAndValues + "-" + getDay(timestamp) + "-" + getHour(timestamp);
+		
+		if(allStats.containsKey(rowName)) { // update stats in memory
 			long[] stats = allStats.get(rowName);
-			// update stats in memory
 			allStats.put(rowName, updateStats(stats, value));
-		} else {
-			addNewMetric(newMetricAndTags, timestamp, value, tags);
+		} else { // store stats in memory
+			long[] stats = {1, value, 0}; // count, mean, standard deviation
+			allStats.put(rowName, stats);
 		}
 	}
 	
@@ -162,7 +170,7 @@ public class TrendAnalysis {
 	 * Monday = 1, Tuesday = 2, etc.
 	 * @param timestamp
 	 */
-	private int getDay(long timestamp) {
+	private static int getDay(long timestamp) {
 		int day = 0;
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
@@ -193,15 +201,10 @@ public class TrendAnalysis {
 	 * @param timestamp
 	 * @return
 	 */
-	private int getHour(long timestamp) {
+	private static int getHour(long timestamp) {
 		int hour;
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
 		return cal.get(Calendar.HOUR);
 	}
-	
-	private void addToHBase() {
-		
-	}
-	
 }
