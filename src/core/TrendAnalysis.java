@@ -69,7 +69,8 @@ public class TrendAnalysis {
 			}
 		}
 		try {
-			client.shutdown().join();
+			client.flush();
+			log.info("flushed");
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -86,7 +87,8 @@ public class TrendAnalysis {
 	         config);
 	  }
 	
-	private void addPoint(String metric, long timestamp, long value, Map<String, String> tags) {
+	public void addPoint(String metric, long timestamp, long value, Map<String, String> tags) {
+		log.info("trendAnalysis adding point!!!!!!!!!!!!!! !!!!!!!!");
 		ArrayList<String> tagsList = new ArrayList<String>(tags.keySet());
 		Collections.sort(tagsList);
 		String metricAndTags = metric;
@@ -96,6 +98,7 @@ public class TrendAnalysis {
 		if(metrics.contains(metricAndTags)) {
 			// update mean and standard deviation
 		} else {
+			metrics.add(metricAndTags);
 			addMetric(metricAndTags);
 		}
 	}
