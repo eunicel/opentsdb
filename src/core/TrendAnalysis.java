@@ -43,18 +43,26 @@ public class TrendAnalysis {
 		log.info("in TrendAnalysis constructor");
 		this.client = client;
 		this.config = config;
-		
+		table = "trends".getBytes();
+
 		// a set of metrics-tags
 		metricsAndTags = new HashSet<String>();
 		
 		// mapping of metrics-tags-day-time to an
 		// array of count, mean, and standard deviation
 		allStats = new HashMap<String, long[]>(); 
-		
-		String tableName = "trends";
-		table = tableName.getBytes();
 	}
 	
+	/**
+	 * Alternate constructor
+	 * @param config An initialized configuration object
+	 */
+	public TrendAnalysis(final Config config) {
+	    this(new HBaseClient(config.getString("tsd.storage.hbase.zk_quorum"),
+	                         config.getString("tsd.storage.hbase.zk_basedir")),
+	         config);
+	  }
+
 	/**
 	 * Adds all the rows needed to store trends for this metric.
 	 * Creates a row for each hour of each day of the week for this metric.
@@ -98,16 +106,7 @@ public class TrendAnalysis {
 		log.info("done initializing rows");
 	}
 	
-	/**
-	 * Alternate constructor
-	 * @param config An initialized configuration object
-	 */
-	public TrendAnalysis(final Config config) {
-	    this(new HBaseClient(config.getString("tsd.storage.hbase.zk_quorum"),
-	                         config.getString("tsd.storage.hbase.zk_basedir")),
-	         config);
-	  }
-	
+
 	/**
 	 * Adds a new point, updates the count, mean, and standard
 	 * deviation if it exists. Otherwise, create new rows for
