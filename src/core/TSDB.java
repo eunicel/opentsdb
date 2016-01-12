@@ -94,8 +94,6 @@ public final class TSDB {
   /** Configuration object for all TSDB components */
   final Config config;
   
-  Logger log = LoggerFactory.getLogger(TSDB.class);
-
   /** Trend analysis */
   TrendAnalysis trendAnalysis = null;
 
@@ -158,7 +156,7 @@ public final class TSDB {
     LOG.debug(config.dumpConfiguration());
     
     trendAnalysis = new TrendAnalysis(config);
-    log.info("TrendAnalysis object created");
+    LOG.info("TrendAnalysis object created");
   }
 
   /**
@@ -635,9 +633,6 @@ public final class TSDB {
                                    final long timestamp,
                                    final double value,
                                    final Map<String, String> tags) {
-    final Logger LOG = LoggerFactory.getLogger(TSDB.class);
-
-    LOG.info("addPoint float!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     if (Double.isNaN(value) || Double.isInfinite(value)) {
       throw new IllegalArgumentException("value is NaN or Infinite: " + value
                                          + " for metric=" + metric
@@ -674,10 +669,6 @@ public final class TSDB {
                                    final long timestamp,
                                    final float value,
                                    final Map<String, String> tags) {
-	final Logger LOG = LoggerFactory.getLogger(TSDB.class);
-
-	LOG.info("addPoint single!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-
 	if (Float.isNaN(value) || Float.isInfinite(value)) {
       throw new IllegalArgumentException("value is NaN or Infinite: " + value
                                          + " for metric=" + metric
