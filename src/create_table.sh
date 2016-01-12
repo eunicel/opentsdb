@@ -16,7 +16,7 @@ TREE_TABLE=${TREE_TABLE-'tsdb-tree'}
 META_TABLE=${META_TABLE-'tsdb-meta'}
 BLOOMFILTER=${BLOOMFILTER-'ROW'}
 # LZO requires lzo2 64bit to be installed + the hadoop-gpl-compression jar.
-COMPRESSION=${COMPRESSION-'LZO'}
+COMPRESSION=${COMPRESSION-'NONE'}
 # All compression codec names are upper case (NONE, LZO, SNAPPY, etc).
 COMPRESSION=`echo "$COMPRESSION" | tr a-z A-Z`
 
@@ -45,4 +45,7 @@ create '$TREE_TABLE',
   
 create '$META_TABLE',
   {NAME => 'name', COMPRESSION => '$COMPRESSION', BLOOMFILTER => '$BLOOMFILTER'}
+
+create 'trends',
+  {NAME => 'trends', COMPRESSION => '$COMPRESSION', BLOOMFILTER => '$BLOOMFILTER'}
 EOF
