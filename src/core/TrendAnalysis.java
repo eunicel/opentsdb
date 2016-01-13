@@ -2,6 +2,7 @@ package net.opentsdb.core;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -19,6 +20,7 @@ import org.hbase.async.GetRequest;
 import org.hbase.async.HBaseClient;
 import org.hbase.async.KeyValue;
 import org.hbase.async.PutRequest;
+import org.hbase.async.Scanner;
 import org.slf4j.LoggerFactory;
 
 import com.stumbleupon.async.Deferred;
@@ -50,6 +52,7 @@ public class TrendAnalysis {
 		// mapping of metrics-tags-day-time to an
 		// array of count, mean, and standard deviation
 		allStats = new HashMap<String, double[]>(); 
+		initializeAllStats();
 	}
 	
 	/**
@@ -175,6 +178,35 @@ public class TrendAnalysis {
 		log.info("updated mean = " + stats[1]);
 		log.info("updated stdev = " + stats[2]);
 		return stats;
+	}
+	
+	/**
+	 * Initializes allStats from HBase.
+	 */
+	private void initializeAllStats() {
+		try {
+			log.info("initializing all stats");
+			Scanner scanner = client.newScanner(table);
+			ArrayList<ArrayList<KeyValue>> table = scanner.nextRows().join();
+			for(ArrayList<KeyValue> point : table) {
+				double[] stats = new double[3];
+				String rowName = "";
+				for(KeyValue stat : point) {
+					rowName = new String(stat.key());
+					String statName = new String(stat.qualifier());
+					if(statName == "count") {
+						stats[0] = ByteBuffer.wrap(stat.value()).getDouble();
+					} else if (statName == "mean") {
+						stats[1] = ByteBuffer.wrap(stat.value()).getDouble();
+					} else if (statName == "standard_deviation") {
+						stats[2] = ByteBuffer.wrap(stat.value()).getDouble();
+					}
+				}
+				allStats.put(rowName, stats);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 	}
 	
 	/**
