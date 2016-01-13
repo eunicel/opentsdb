@@ -95,7 +95,7 @@ public class TrendAnalysis {
 	 * @param stat Statistic to return (count, mean, or standard deviation)
 	 * @return oldStat Requested statistic of the given row
 	 */
-	private double getStatFromHBase(String rowName, String stat) {
+	/*private double getStatFromHBase(String rowName, String stat) {
 		double oldStat = 0;
 		try {
 			log.info("getting " + stat + " !!!!!!!!!!!!!!!!");
@@ -108,7 +108,7 @@ public class TrendAnalysis {
 			log.info("ERROR getting " + stat + " from HBase");
 		}
 		return oldStat;
-	}
+	}*/
 	
 	/**
 	 * Adds a new point, updates the count, mean, and standard
