@@ -14,6 +14,7 @@ import java.util.Set;
 
 import net.opentsdb.utils.Config;
 
+import org.hbase.async.GetRequest;
 import org.hbase.async.HBaseClient;
 import org.hbase.async.KeyValue;
 import org.hbase.async.PutRequest;
@@ -61,34 +62,18 @@ public class TrendAnalysis {
 	  }
 
 	/**
-	 * Adds all the rows needed to store trends for this metric.
-	 * Creates a row for each hour of each day of the week for this metric.
-	 * @param metric
+	 * Creates a new row for this new data point in HBase
+	 * and initializes the stats based on its value.
+	 * @param rowName
+	 * @param value
 	 */
-	private static void createNewRowInHBase(String rowName,
-			long timestamp, long value, Map<String, String> tags) {
-		log.info("start initializing rows for metric " + rowName);
+	private static void createNewRowInHBase(String rowName, long value) {
+		log.info("start creating row " + rowName);
 		
-		// Store into HBase
-		byte[] row = rowName.getBytes();
+		// initial values for count, mean, and standard deviation
+		long[] initialData = {1, value, 0};
+		addDataToHBase(rowName, initialData);
 		
-		byte meanBytes[] = new byte[8];
-		ByteBuffer meanBuf = ByteBuffer.wrap(meanBytes);
-		meanBuf.putLong(value);
-		KeyValue mean =
-				new KeyValue(row, FAMILY, "mean".getBytes(), meanBytes);
-		
-		byte stdevBytes[] = new byte[8];
-		ByteBuffer stdevBuf = ByteBuffer.wrap(stdevBytes);
-		stdevBuf.putLong(0);
-		KeyValue standardDev =
-				new KeyValue(row, FAMILY, "standard_deviation".getBytes(), stdevBytes);
-		
-		PutRequest meanData = new PutRequest(table, mean);
-		PutRequest standardDevData = new PutRequest(table, standardDev);
-		client.put(meanData);
-		client.put(standardDevData);
-
 		try {
 			client.flush();
 			log.info("flushed");
@@ -98,8 +83,80 @@ public class TrendAnalysis {
 		log.info("done initializing rows");
 	}
 	
-	private void updateStatsInHBase() {
+	private static void addDataToHBase(String rowName, long[] stats) {
+		byte[] row = rowName.getBytes();
+
+		byte countBytes[] = new byte[8];
+		ByteBuffer countBuf = ByteBuffer.wrap(countBytes);
+		countBuf.putLong(stats[0]);
+		KeyValue countKv =
+				new KeyValue(row, FAMILY, "count".getBytes(), countBytes);
 		
+		byte meanBytes[] = new byte[8];
+		ByteBuffer meanBuf = ByteBuffer.wrap(meanBytes);
+		meanBuf.putLong(stats[1]);
+		KeyValue meanKv =
+				new KeyValue(row, FAMILY, "mean".getBytes(), meanBytes);
+		
+		byte stdevBytes[] = new byte[8];
+		ByteBuffer stdevBuf = ByteBuffer.wrap(stdevBytes);
+		stdevBuf.putLong(stats[2]);
+		KeyValue standardDevKv =
+				new KeyValue(row, FAMILY, "standard_deviation".getBytes(), stdevBytes);
+		
+		PutRequest countData = new PutRequest(table, countKv);
+		PutRequest meanData = new PutRequest(table, meanKv);
+		PutRequest standardDevData = new PutRequest(table, standardDevKv);
+		
+		client.put(countData);
+		client.put(meanData);
+		client.put(standardDevData);
+	}
+	
+	/**
+	 * Updates the given row in Hbase with the given value.
+	 * @param rowName
+	 * @param value
+	 */
+	private void updateRowInHBase(String rowName, long value) {
+		long count = getStatFromHBase(rowName, "count");
+		long mean = getStatFromHBase(rowName, "mean");
+		long stdev = getStatFromHBase(rowName, "standard_deviation");
+		long[] oldStats = {count, mean, stdev};
+		log.info("mean = " + mean);
+		log.info("count = " + count);
+		log.info("stdev = " + stdev);
+		long[] newStats = updateStats(oldStats, value);
+		addDataToHBase(rowName, newStats);
+		try {
+			client.flush();
+			log.info("flushed");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	/**
+	 * Given the row, get the requested statistic.
+	 * @param rowName Key of the row
+	 * @param stat Statistic to return (count, mean, or standard deviation)
+	 * @return oldStat Requested statistic of the given row
+	 */
+	private long getStatFromHBase(String rowName, String stat) {
+		long oldStat = 0;
+		try {
+			log.info("getting " + stat + " !!!!!!!!!!!!!!!!");
+			GetRequest get = new GetRequest(table, rowName.getBytes(), FAMILY, stat.getBytes());
+			KeyValue kv = client.get(get).join().get(0);
+			byte[] bytes = kv.value();
+			for (int i = 0; i < bytes.length; i++) {
+				oldStat = (oldStat << 8) + (bytes[i] & 0xff); // converts from byte[] to long
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+			log.info("ERROR getting " + stat + " from HBase");
+		}
+		return oldStat;
 	}
 	
 
@@ -130,11 +187,14 @@ public class TrendAnalysis {
 		
 		if(allStats.containsKey(rowName)) { // update stats in memory
 			long[] stats = allStats.get(rowName);
+			log.info("addPoint - updating HBase");
 			allStats.put(rowName, updateStats(stats, value));
+			updateRowInHBase(rowName, value);
 		} else { // store stats in memory
 			long[] stats = {1, value, 0}; // count, mean, standard deviation
 			allStats.put(rowName, stats);
-			createNewRowInHBase(rowName, timestamp, value, tags);
+			log.info("addPoint - creating row in HBase");
+			createNewRowInHBase(rowName, value);
 		}
 	}
 	
@@ -144,7 +204,7 @@ public class TrendAnalysis {
 	 * https://en.wikipedia.org/wiki/Standard_deviation#Population-based_statistics
 	 * @param stats An array of count, mean, and standard deviation
 	 * @param value The new value to add
-	 * @return
+	 * @return stats The updated coutn, mean, and standard deviation
 	 */
 	private long[] updateStats(long[] stats, long value) {
 		long count = stats[0];
@@ -177,11 +237,14 @@ public class TrendAnalysis {
 	 * @return
 	 */
 	private static int getHour(long timestamp) {
-		int hour;
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
-		hour = cal.get(Calendar.HOUR_OF_DAY);
-		log.info("hour of day = " + hour + "**************");
-		return hour;
+		return cal.get(Calendar.HOUR_OF_DAY);
+	}
+	
+	
+	public void shutdown(){
+		client.flush();
+		client.shutdown();
 	}
 }
