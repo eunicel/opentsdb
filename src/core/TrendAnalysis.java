@@ -27,23 +27,24 @@ public class TrendAnalysis {
 	
 	private static HBaseClient client;
 	private final Config config;
-	private static byte[] table;
+	
+	private static byte[] table = "trends".getBytes();
 	private static final byte[] FAMILY = { 't' };
-	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
 	private static HashMap<String, long[]> allStats;
+	
+	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
+
 	
 	/**
 	 * Creates a trends table in HBase that stores the mean
 	 * and standard deviation for each hour of each day of
-	 * the week.
-	 * @param args
-	 * @throws IOException
+	 * @param client
+	 * @param config
 	 */
 	public TrendAnalysis(HBaseClient client, final Config config){
 		log.info("in TrendAnalysis constructor");
 		this.client = client;
 		this.config = config;
-		table = "trends".getBytes();
 		
 		// mapping of metrics-tags-day-time to an
 		// array of count, mean, and standard deviation
@@ -56,8 +57,7 @@ public class TrendAnalysis {
 	 */
 	public TrendAnalysis(final Config config) {
 	    this(new HBaseClient(config.getString("tsd.storage.hbase.zk_quorum"),
-	                         config.getString("tsd.storage.hbase.zk_basedir")),
-	         config);
+	                         config.getString("tsd.storage.hbase.zk_basedir")), config);
 	  }
 
 	/**
@@ -65,27 +65,24 @@ public class TrendAnalysis {
 	 * Creates a row for each hour of each day of the week for this metric.
 	 * @param metric
 	 */
-	private static void createNewRowInHBase(String newMetricAndTags,
+	private static void createNewRowInHBase(String rowName,
 			long timestamp, long value, Map<String, String> tags) {
-		log.info("start initializing rows for metric " + newMetricAndTags);
+		log.info("start initializing rows for metric " + rowName);
 		
-		KeyValue mean = null;
-		KeyValue standardDev = null;
-		
-		String rowName = newMetricAndTags + "-" + getDay(timestamp) + "-" + getHour(timestamp);
-
 		// Store into HBase
 		byte[] row = rowName.getBytes();
 		
 		byte meanBytes[] = new byte[8];
 		ByteBuffer meanBuf = ByteBuffer.wrap(meanBytes);
 		meanBuf.putLong(value);
-		mean = new KeyValue(row, FAMILY, "mean".getBytes(), meanBytes);
+		KeyValue mean =
+				new KeyValue(row, FAMILY, "mean".getBytes(), meanBytes);
 		
 		byte stdevBytes[] = new byte[8];
 		ByteBuffer stdevBuf = ByteBuffer.wrap(stdevBytes);
 		stdevBuf.putLong(0);
-		standardDev = new KeyValue(row, FAMILY, "standard_deviation".getBytes(), new byte[0]);
+		KeyValue standardDev =
+				new KeyValue(row, FAMILY, "standard_deviation".getBytes(), stdevBytes);
 		
 		PutRequest meanData = new PutRequest(table, mean);
 		PutRequest standardDevData = new PutRequest(table, standardDev);
@@ -125,14 +122,10 @@ public class TrendAnalysis {
 		Collections.sort(tagsList);
 		String tagsAndValues = "";
 		for(String tag : tagsList) {
-			if(tagsAndValues.equals("")) {
-				tagsAndValues = tag + "=" + tags.get(tag);
-			} else {
-				tagsAndValues = tagsAndValues + "-" + tag + "=" + tags.get(tag);
-			}
+			tagsAndValues = tagsAndValues + "-" + tag + "=" + tags.get(tag);
 		}
 		
-		// Create key
+		// Construct key in allStats table
 		String rowName = metric + tagsAndValues + "-" + getDay(timestamp) + "-" + getHour(timestamp);
 		
 		if(allStats.containsKey(rowName)) { // update stats in memory
@@ -141,6 +134,7 @@ public class TrendAnalysis {
 		} else { // store stats in memory
 			long[] stats = {1, value, 0}; // count, mean, standard deviation
 			allStats.put(rowName, stats);
+			createNewRowInHBase(rowName, timestamp, value, tags);
 		}
 	}
 	
@@ -175,6 +169,7 @@ public class TrendAnalysis {
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
 		int dayOfWeek = cal.get(Calendar.DAY_OF_WEEK);
+		log.info("day of week = " + dayOfWeek + "**************");
 		if(dayOfWeek == Calendar.MONDAY){
 			day = 1;
 		} else if (dayOfWeek == Calendar.TUESDAY) {
@@ -205,6 +200,8 @@ public class TrendAnalysis {
 		int hour;
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
-		return cal.get(Calendar.HOUR);
+		hour = cal.get(Calendar.HOUR);
+		log.info("hour of day = " + hour + "**************");
+		return hour;
 	}
 }
