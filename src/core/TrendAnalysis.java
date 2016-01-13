@@ -36,7 +36,6 @@ public class TrendAnalysis {
 	
 	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
 
-	
 	/**
 	 * Creates a trends table in HBase that stores the mean
 	 * and standard deviation for each hour of each day of
@@ -61,28 +60,6 @@ public class TrendAnalysis {
 	    this(new HBaseClient(config.getString("tsd.storage.hbase.zk_quorum"),
 	                         config.getString("tsd.storage.hbase.zk_basedir")), config);
 	  }
-
-	/**
-	 * Creates a new row for this new data point in HBase
-	 * and initializes the stats based on its value.
-	 * @param rowName
-	 * @param value
-	 */
-	private static void createNewRowInHBase(String rowName, long value) {
-		log.info("start creating row " + rowName);
-		
-		// initial values for count, mean, and standard deviation
-		double[] initialData = {1, (double) value, 0};
-		addDataToHBase(rowName, initialData);
-		
-		try {
-			client.flush();
-			log.info("flushed");
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-		log.info("done initializing rows");
-	}
 	
 	private static void addDataToHBase(String rowName, double[] stats) {
 		log.info("adding data to HBase = " + stats[0] + " " + stats[1] + " " + stats[2]);
@@ -113,32 +90,6 @@ public class TrendAnalysis {
 	}
 	
 	/**
-	 * Updates the given row in Hbase with the new stats.
-	 * @param newStats
-	 * @param value
-	 */
-/*	private void updateRowInHBase(String rowName, double[] newStats) {
-		double count = getStatFromHBase(rowName, "count");
-		double mean = getStatFromHBase(rowName, "mean");
-		double stdev = getStatFromHBase(rowName, "standard_deviation");
-		double[] oldStats = {count, mean, stdev};
-		log.info("mean = " + mean);
-		log.info("count = " + count);
-		log.info("stdev = " + stdev);
-		double[] newStats = updateStats(oldStats, value);
-		log.info("putting in new count = " + newStats[0]);
-		log.info("putting in new mean = " + newStats[1]);
-		log.info("putting in new stdev = " + newStats[2]);
-		addDataToHBase(rowName, newStats);
-		try {
-			client.flush();
-			log.info("flushed");
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-	}*/
-	
-	/**
 	 * Given the row, get the requested statistic.
 	 * @param rowName Key of the row
 	 * @param stat Statistic to return (count, mean, or standard deviation)
@@ -159,7 +110,6 @@ public class TrendAnalysis {
 		return oldStat;
 	}
 	
-
 	/**
 	 * Adds a new point, updates the count, mean, and standard
 	 * deviation if it exists. Otherwise, create new rows for
@@ -196,7 +146,10 @@ public class TrendAnalysis {
 			double[] stats = {1, value, 0}; // count, mean, standard deviation
 			allStats.put(rowName, stats);
 			log.info("addPoint - creating row in HBase");
-			createNewRowInHBase(rowName, value);
+			
+			// initial values for count, mean, and standard deviation
+			double[] initialStats = {1, (double) value, 0};
+			addDataToHBase(rowName, initialStats);
 		}
 	}
 	
