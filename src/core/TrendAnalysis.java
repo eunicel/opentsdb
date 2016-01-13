@@ -161,33 +161,13 @@ public class TrendAnalysis {
 	
 	/**
 	 * Gets the day of the week given the epoch timestamp.
-	 * Monday = 1, Tuesday = 2, etc.
+	 * Sunday = 1, Monday = 2, Tuesday = 3, etc.
 	 * @param timestamp
 	 */
 	private static int getDay(long timestamp) {
-		int day = 0;
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
-		int dayOfWeek = cal.get(Calendar.DAY_OF_WEEK);
-		log.info("day of week = " + dayOfWeek + "**************");
-		if(dayOfWeek == Calendar.MONDAY){
-			day = 1;
-		} else if (dayOfWeek == Calendar.TUESDAY) {
-			day = 2;
-		} else if (dayOfWeek == Calendar.WEDNESDAY) {
-			day = 3;
-		} else if (dayOfWeek == Calendar.THURSDAY) {
-			day = 4;
-		} else if (dayOfWeek == Calendar.FRIDAY) {
-			day = 5;
-		} else if (dayOfWeek == Calendar.SATURDAY) {
-			day = 6;
-		} else if (dayOfWeek == Calendar.SUNDAY) {
-			day = 7;
-		} else {
-			log.info("ERROR: Not a day of the week");
-		}
-		return day;
+		return cal.get(Calendar.DAY_OF_WEEK);
 	}
 	
 	/**
@@ -200,7 +180,7 @@ public class TrendAnalysis {
 		int hour;
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
-		hour = cal.get(Calendar.HOUR);
+		hour = cal.get(Calendar.HOUR_OF_DAY);
 		log.info("hour of day = " + hour + "**************");
 		return hour;
 	}
