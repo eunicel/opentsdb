@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.nio.ByteBuffer;
 
 import net.opentsdb.utils.Config;
 
@@ -31,7 +32,7 @@ public class TrendAnalysis {
 	
 	private static byte[] table = "trends".getBytes();
 	private static final byte[] FAMILY = { 't' };
-	private static HashMap<String, long[]> allStats;
+	private static HashMap<String, double[]> allStats;
 	
 	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
 
@@ -49,7 +50,7 @@ public class TrendAnalysis {
 		
 		// mapping of metrics-tags-day-time to an
 		// array of count, mean, and standard deviation
-		allStats = new HashMap<String, long[]>(); 
+		allStats = new HashMap<String, double[]>(); 
 	}
 	
 	/**
@@ -71,7 +72,7 @@ public class TrendAnalysis {
 		log.info("start creating row " + rowName);
 		
 		// initial values for count, mean, and standard deviation
-		long[] initialData = {1, value, 0};
+		double[] initialData = {1, (double) value, 0};
 		addDataToHBase(rowName, initialData);
 		
 		try {
@@ -83,24 +84,22 @@ public class TrendAnalysis {
 		log.info("done initializing rows");
 	}
 	
-	private static void addDataToHBase(String rowName, long[] stats) {
+	private static void addDataToHBase(String rowName, double[] stats) {
+		log.info("adding data to HBase = " + stats[0] + " " + stats[1] + " " + stats[2]);
 		byte[] row = rowName.getBytes();
 
 		byte countBytes[] = new byte[8];
-		ByteBuffer countBuf = ByteBuffer.wrap(countBytes);
-		countBuf.putLong(stats[0]);
+		ByteBuffer.wrap(countBytes).putDouble(stats[0]);
 		KeyValue countKv =
 				new KeyValue(row, FAMILY, "count".getBytes(), countBytes);
 		
 		byte meanBytes[] = new byte[8];
-		ByteBuffer meanBuf = ByteBuffer.wrap(meanBytes);
-		meanBuf.putLong(stats[1]);
+		ByteBuffer.wrap(meanBytes).putDouble(stats[1]);
 		KeyValue meanKv =
 				new KeyValue(row, FAMILY, "mean".getBytes(), meanBytes);
 		
 		byte stdevBytes[] = new byte[8];
-		ByteBuffer stdevBuf = ByteBuffer.wrap(stdevBytes);
-		stdevBuf.putLong(stats[2]);
+		ByteBuffer.wrap(stdevBytes).putDouble(stats[2]);
 		KeyValue standardDevKv =
 				new KeyValue(row, FAMILY, "standard_deviation".getBytes(), stdevBytes);
 		
@@ -114,19 +113,22 @@ public class TrendAnalysis {
 	}
 	
 	/**
-	 * Updates the given row in Hbase with the given value.
-	 * @param rowName
+	 * Updates the given row in Hbase with the new stats.
+	 * @param newStats
 	 * @param value
 	 */
-	private void updateRowInHBase(String rowName, long value) {
-		long count = getStatFromHBase(rowName, "count");
-		long mean = getStatFromHBase(rowName, "mean");
-		long stdev = getStatFromHBase(rowName, "standard_deviation");
-		long[] oldStats = {count, mean, stdev};
+/*	private void updateRowInHBase(String rowName, double[] newStats) {
+		double count = getStatFromHBase(rowName, "count");
+		double mean = getStatFromHBase(rowName, "mean");
+		double stdev = getStatFromHBase(rowName, "standard_deviation");
+		double[] oldStats = {count, mean, stdev};
 		log.info("mean = " + mean);
 		log.info("count = " + count);
 		log.info("stdev = " + stdev);
-		long[] newStats = updateStats(oldStats, value);
+		double[] newStats = updateStats(oldStats, value);
+		log.info("putting in new count = " + newStats[0]);
+		log.info("putting in new mean = " + newStats[1]);
+		log.info("putting in new stdev = " + newStats[2]);
 		addDataToHBase(rowName, newStats);
 		try {
 			client.flush();
@@ -134,7 +136,7 @@ public class TrendAnalysis {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-	}
+	}*/
 	
 	/**
 	 * Given the row, get the requested statistic.
@@ -142,16 +144,14 @@ public class TrendAnalysis {
 	 * @param stat Statistic to return (count, mean, or standard deviation)
 	 * @return oldStat Requested statistic of the given row
 	 */
-	private long getStatFromHBase(String rowName, String stat) {
-		long oldStat = 0;
+	private double getStatFromHBase(String rowName, String stat) {
+		double oldStat = 0;
 		try {
 			log.info("getting " + stat + " !!!!!!!!!!!!!!!!");
 			GetRequest get = new GetRequest(table, rowName.getBytes(), FAMILY, stat.getBytes());
 			KeyValue kv = client.get(get).join().get(0);
 			byte[] bytes = kv.value();
-			for (int i = 0; i < bytes.length; i++) {
-				oldStat = (oldStat << 8) + (bytes[i] & 0xff); // converts from byte[] to long
-			}
+			ByteBuffer.wrap(bytes).getDouble();
 		} catch (Exception e) {
 			e.printStackTrace();
 			log.info("ERROR getting " + stat + " from HBase");
@@ -186,12 +186,14 @@ public class TrendAnalysis {
 		String rowName = metric + tagsAndValues + "-" + getDay(timestamp) + "-" + getHour(timestamp);
 		
 		if(allStats.containsKey(rowName)) { // update stats in memory
-			long[] stats = allStats.get(rowName);
+			double[] stats = allStats.get(rowName);
 			log.info("addPoint - updating HBase");
-			allStats.put(rowName, updateStats(stats, value));
-			updateRowInHBase(rowName, value);
+			log.info("adding : " + stats[0] + " " + stats[1] + " " + stats[2]);
+			double[] newStats = updateStats(stats, value);
+			allStats.put(rowName, newStats);
+			addDataToHBase(rowName, newStats);
 		} else { // store stats in memory
-			long[] stats = {1, value, 0}; // count, mean, standard deviation
+			double[] stats = {1, value, 0}; // count, mean, standard deviation
 			allStats.put(rowName, stats);
 			log.info("addPoint - creating row in HBase");
 			createNewRowInHBase(rowName, value);
@@ -206,16 +208,19 @@ public class TrendAnalysis {
 	 * @param value The new value to add
 	 * @return stats The updated coutn, mean, and standard deviation
 	 */
-	private long[] updateStats(long[] stats, long value) {
-		long count = stats[0];
-		long mean = stats[1];
-		long stdev = stats[2];
+	private double[] updateStats(double[] stats, long value) {
+		double count = stats[0];
+		double mean = stats[1];
+		double stdev = stats[2];
 		
 		stats[1] = ((mean * count) + value) / (count + 1); // update mean
 		stats[0] += 1; // update count
-		stats[2] = (long) Math.sqrt((count * Math.pow(stdev, 2) / (count + 1)
+		stats[2] = (double) Math.sqrt((count * Math.pow(stdev, 2) / (count + 1)
 				+ (count / Math.pow((count + 1), 2))
 				* Math.pow((mean - value), 2))); // update standard deviation
+		log.info("updated count = " + stats[0]);
+		log.info("updated mean = " + stats[1]);
+		log.info("updated stdev = " + stats[2]);
 		return stats;
 	}
 	
