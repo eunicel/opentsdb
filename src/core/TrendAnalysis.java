@@ -33,7 +33,8 @@ public class TrendAnalysis {
 	private final Config config;
 	
 	private static byte[] table = "trends".getBytes();
-	private static final byte[] FAMILY = { 't' };
+	private static final byte[] TIME_FAMILY = {'t'};
+	private static final byte[] TRENDS_FAMILY = {'r'};
 	private static HashMap<String, double[]> allStats;
 	
 	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
@@ -71,17 +72,17 @@ public class TrendAnalysis {
 		byte countBytes[] = new byte[8];
 		ByteBuffer.wrap(countBytes).putDouble(stats[0]);
 		KeyValue countKv =
-				new KeyValue(row, FAMILY, "count".getBytes(), countBytes);
+				new KeyValue(row, TRENDS_FAMILY, "count".getBytes(), countBytes);
 		
 		byte meanBytes[] = new byte[8];
 		ByteBuffer.wrap(meanBytes).putDouble(stats[1]);
 		KeyValue meanKv =
-				new KeyValue(row, FAMILY, "mean".getBytes(), meanBytes);
+				new KeyValue(row, TRENDS_FAMILY, "mean".getBytes(), meanBytes);
 		
 		byte stdevBytes[] = new byte[8];
 		ByteBuffer.wrap(stdevBytes).putDouble(stats[2]);
 		KeyValue standardDevKv =
-				new KeyValue(row, FAMILY, "standard_deviation".getBytes(), stdevBytes);
+				new KeyValue(row, TRENDS_FAMILY, "standard_deviation".getBytes(), stdevBytes);
 		
 		PutRequest countData = new PutRequest(table, countKv);
 		PutRequest meanData = new PutRequest(table, meanKv);
