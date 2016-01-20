@@ -155,7 +155,7 @@ public final class TSDB {
     }
     LOG.debug(config.dumpConfiguration());
     
-    trendAnalysis = new TrendAnalysis(config);
+    trendAnalysis = new TrendAnalysis(config, this);
     LOG.info("TrendAnalysis object created");
   }
 
@@ -593,7 +593,6 @@ public final class TSDB {
     final Logger LOG = LoggerFactory.getLogger(TSDB.class);
 
 	LOG.info("addPoint!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-	trendAnalysis.addPoint(metric, timestamp, value, tags);
     final byte[] v;
     if (Byte.MIN_VALUE <= value && value <= Byte.MAX_VALUE) {
       v = new byte[] { (byte) value };
@@ -689,6 +688,7 @@ public final class TSDB {
 	final Logger LOG = LoggerFactory.getLogger(TSDB.class);
 
 	LOG.info("add point internal!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+	trendAnalysis.addPoint(metric, value, timestamp, tags, flags);
 
 	// we only accept positive unix epoch timestamps in seconds or milliseconds
     if (timestamp < 0 || ((timestamp & Const.SECOND_MASK) != 0 && 

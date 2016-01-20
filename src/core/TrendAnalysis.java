@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,7 @@ import java.nio.ByteBuffer;
 
 import net.opentsdb.utils.Config;
 
+import org.hbase.async.Bytes;
 import org.hbase.async.GetRequest;
 import org.hbase.async.HBaseClient;
 import org.hbase.async.KeyValue;
@@ -81,21 +83,24 @@ public class TrendAnalysis {
 				while(true) {
 					try{
 						log.info("start sleep");
-						Thread.sleep(10000); // Sleeps for 2 hours -- 10 sec for testing
+						Thread.sleep(20000); // Sleeps for 2 hours -- 20 sec for testing
 						log.info("done sleeping");
 					} catch (Exception e) {
 						e.printStackTrace();
 					}
 					log.info("start looking through the queue");
-					for(String point : queue.keySet()) {
+					Iterator<String> iterator = queue.keySet().iterator();
+					while(iterator.hasNext()) {
+						String point = iterator.next();
 						log.info("looking at row : " + point);
 						long timeAdded = queue.get(point);
 						long currentTime = System.currentTimeMillis() / 1000L;
 
 						// ensures no more data points will be added to this hour
-						if(currentTime > timeAdded + 10L) { // added > 2 hours ago -- 10 sec for testing
+						if(currentTime > timeAdded + 20L) { // added > 2 hours ago -- 20 sec for testing
 							log.info("row added > 10 sec ago");
 							updateTrendData(point);
+							iterator.remove();
 						} else {
 							// points are sorted by time added so
 							// all points after this will be even more recent
@@ -118,26 +123,43 @@ public class TrendAnalysis {
 			
 			String row = getTrendsRowKey(metric, tags);
 			ArrayList<KeyValue> results = getRowResults(row);
+			log.info("row = " + row);
+			log.info("results.size() = " + results.size());
 			if(results.size() == 0) {
 				initializeNewRows(row, dataPoint);
 				results = getRowResults(row);
+				log.info("after initialization. row = " + row);
+				log.info("after intiialization. results.size() = " + results.size());
 			}
 
 			byte[] timestampBytes = results.get(0).value();	// get stored timestamp from trends table
 			long storedTimestamp = ByteBuffer.wrap(timestampBytes).getLong();
+			log.info("stored timestamp = " + storedTimestamp);
 			long pointTimestamp = getTimestampFromPoint(dataPoint); // get timestamp from data point
-				
+			log.info("point timestamp = " + pointTimestamp);
+			
 			if (pointTimestamp > storedTimestamp) {
+				log.info("comparing stored with point's timestamp");
 			    final byte[] rowKey = IncomingDataPoints.rowKeyTemplate(tsdb, metric, tags);
+			    final long base_time;
 			    //final byte[] qualifier = Internal.buildQualifier(timestamp, flags);
-
+			    if ((timestamp & Const.SECOND_MASK) != 0) {
+			        // drop the ms timestamp to seconds to calculate the base timestamp
+			        base_time = ((timestamp / 1000) - 
+			            ((timestamp / 1000) % Const.MAX_TIMESPAN));
+			      } else {
+			        base_time = (timestamp - (timestamp % Const.MAX_TIMESPAN));
+			      }
+			    Bytes.setInt(rowKey, (int) base_time, tsdb.metrics.width());
 				GetRequest getData = new GetRequest(tsdb_table, rowKey, T_FAMILY);
 				
 				ArrayList<KeyValue> dataResults = client.get(getData).join();
 				log.info("got results = " + dataResults);
 				for(KeyValue kv : dataResults) {
-					log.info("kv timestamp = " + kv.timestamp() + ", " + kv.value());			
+					log.info("kv timestamp = " + kv.timestamp() + ", " + kv.value().toString());			
 				}
+			} else {
+				log.info("already updated");
 			}
 			
 		} catch (Exception e) {
@@ -160,7 +182,7 @@ public class TrendAnalysis {
 	
 	/**
 	 * initialize 3 rows (count, mean, stdev) in trends table
-	 * for trends family.
+	 * for trends family and timestamp for each row.
 	 * @param row
 	 * @param point
 	 */
@@ -267,7 +289,6 @@ public class TrendAnalysis {
 		}
 		return getTrendsRowKey(metric, tags) + "-" + String.valueOf(flags)
 			+ "-" + String.valueOf(timestamp) + "-" + v;
-		
 	}
 	
 	/**
