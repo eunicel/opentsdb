@@ -2,6 +2,7 @@ package net.opentsdb.core;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.DoubleBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -9,9 +10,12 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.nio.ByteBuffer;
 
 import net.opentsdb.utils.Config;
@@ -31,11 +35,16 @@ public class TrendAnalysis {
 	
 	private static HBaseClient client;
 	private final Config config;
+	private TSDB tsdb;
 	
-	private static byte[] table = "trends".getBytes();
-	private static final byte[] TIME_FAMILY = {'t'};
+	private static byte[] trends_table = "trends".getBytes();
 	private static final byte[] TRENDS_FAMILY = {'r'};
-	private static HashMap<String, double[]> allStats;
+	private static final byte[] T_FAMILY = {'t'};
+
+	private static byte[] tsdb_table = "tsdb".getBytes();
+	private static final byte[] T_QUALIFIER = {'t'};
+	
+	private Map<String, Long> queue;
 	
 	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
 
@@ -45,75 +54,172 @@ public class TrendAnalysis {
 	 * @param client
 	 * @param config
 	 */
-	public TrendAnalysis(HBaseClient client, final Config config){
+	public TrendAnalysis(HBaseClient client, final Config config, TSDB tsdb){
 		log.info("in TrendAnalysis constructor");
 		this.client = client;
 		this.config = config;
+		this.tsdb = tsdb;
 		
-		// mapping of metrics-tags-day-time to an
-		// array of count, mean, and standard deviation
-		allStats = new HashMap<String, double[]>(); 
-		initializeAllStats();
+		queue = Collections.synchronizedMap(new LinkedHashMap<String, Long>());
+
+		startThread();
 	}
 	
 	/**
 	 * Alternate constructor
 	 * @param config An initialized configuration object
 	 */
-	public TrendAnalysis(final Config config) {
+	public TrendAnalysis(final Config config, TSDB tsdb) {
 	    this(new HBaseClient(config.getString("tsd.storage.hbase.zk_quorum"),
-	                         config.getString("tsd.storage.hbase.zk_basedir")), config);
+	                         config.getString("tsd.storage.hbase.zk_basedir")),
+	    		config, tsdb);
 	  }
 	
-	private static void addDataToHBase(String rowName, double[] stats) {
-		log.info("adding data to HBase = " + stats[0] + " " + stats[1] + " " + stats[2]);
-		byte[] row = rowName.getBytes();
+	private void startThread() {
+		Thread thread = new Thread(new Runnable() {
+			public void run() {
+				while(true) {
+					try{
+						log.info("start sleep");
+						Thread.sleep(10000); // Sleeps for 2 hours -- 10 sec for testing
+						log.info("done sleeping");
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+					log.info("start looking through the queue");
+					for(String point : queue.keySet()) {
+						log.info("looking at row : " + point);
+						long timeAdded = queue.get(point);
+						long currentTime = System.currentTimeMillis() / 1000L;
 
-		byte countBytes[] = new byte[8];
-		ByteBuffer.wrap(countBytes).putDouble(stats[0]);
-		KeyValue countKv =
-				new KeyValue(row, TRENDS_FAMILY, "count".getBytes(), countBytes);
-		
-		byte meanBytes[] = new byte[8];
-		ByteBuffer.wrap(meanBytes).putDouble(stats[1]);
-		KeyValue meanKv =
-				new KeyValue(row, TRENDS_FAMILY, "mean".getBytes(), meanBytes);
-		
-		byte stdevBytes[] = new byte[8];
-		ByteBuffer.wrap(stdevBytes).putDouble(stats[2]);
-		KeyValue standardDevKv =
-				new KeyValue(row, TRENDS_FAMILY, "standard_deviation".getBytes(), stdevBytes);
-		
-		PutRequest countData = new PutRequest(table, countKv);
-		PutRequest meanData = new PutRequest(table, meanKv);
-		PutRequest standardDevData = new PutRequest(table, standardDevKv);
-		
-		client.put(countData);
-		client.put(meanData);
-		client.put(standardDevData);
+						// ensures no more data points will be added to this hour
+						if(currentTime > timeAdded + 10L) { // added > 2 hours ago -- 10 sec for testing
+							log.info("row added > 10 sec ago");
+							updateTrendData(point);
+						} else {
+							// points are sorted by time added so
+							// all points after this will be even more recent
+							break;
+						}
+					}
+				}
+			}
+		});
+		thread.start();
+	}
+
+	private void updateTrendData(String dataPoint) {
+		try {
+			log.info("updating trend data");
+			// get info from dataPoint
+			String metric = getMetricFromPoint(dataPoint);
+			Map<String, String> tags = getTagsFromPoint(dataPoint);
+			long timestamp = getTimestampFromPoint(dataPoint);
+			
+			String row = getTrendsRowKey(metric, tags);
+			ArrayList<KeyValue> results = getRowResults(row);
+			if(results.size() == 0) {
+				initializeNewRows(row, dataPoint);
+				results = getRowResults(row);
+			}
+
+			byte[] timestampBytes = results.get(0).value();	// get stored timestamp from trends table
+			long storedTimestamp = ByteBuffer.wrap(timestampBytes).getLong();
+			long pointTimestamp = getTimestampFromPoint(dataPoint); // get timestamp from data point
+				
+			if (pointTimestamp > storedTimestamp) {
+			    final byte[] rowKey = IncomingDataPoints.rowKeyTemplate(tsdb, metric, tags);
+			    //final byte[] qualifier = Internal.buildQualifier(timestamp, flags);
+
+				GetRequest getData = new GetRequest(tsdb_table, rowKey, T_FAMILY);
+				
+				ArrayList<KeyValue> dataResults = client.get(getData).join();
+				log.info("got results = " + dataResults);
+				for(KeyValue kv : dataResults) {
+					log.info("kv timestamp = " + kv.timestamp() + ", " + kv.value());			
+				}
+			}
+			
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	private ArrayList<KeyValue> getRowResults(String row) {
+		ArrayList<KeyValue> results = new ArrayList<KeyValue>();
+		try {
+			String rowCount = row + "-count"; // get count (if count exists, mean and stdev should too)
+			final byte[] rowCountBytes = rowCount.getBytes();
+			GetRequest getTimestamp = new GetRequest(trends_table, rowCountBytes, T_FAMILY, T_QUALIFIER);
+			results = client.get(getTimestamp).join();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return results;
 	}
 	
 	/**
-	 * Given the row, get the requested statistic.
-	 * @param rowName Key of the row
-	 * @param stat Statistic to return (count, mean, or standard deviation)
-	 * @return oldStat Requested statistic of the given row
+	 * initialize 3 rows (count, mean, stdev) in trends table
+	 * for trends family.
+	 * @param row
+	 * @param point
 	 */
-	/*private double getStatFromHBase(String rowName, String stat) {
-		double oldStat = 0;
-		try {
-			log.info("getting " + stat + " !!!!!!!!!!!!!!!!");
-			GetRequest get = new GetRequest(table, rowName.getBytes(), FAMILY, stat.getBytes());
-			KeyValue kv = client.get(get).join().get(0);
-			byte[] bytes = kv.value();
-			ByteBuffer.wrap(bytes).getDouble();
-		} catch (Exception e) {
-			e.printStackTrace();
-			log.info("ERROR getting " + stat + " from HBase");
-		}
-		return oldStat;
-	}*/
+	private void initializeNewRows(String row, String point) {
+		log.info("initializing new rows");
+
+		// build qualifier
+		long timestamp = getTimestampFromPoint(point);
+		int day = getDay(timestamp);
+		int hour = getHour(timestamp);
+		String qualifier = day + "-" + hour;
+		
+		// create put requests for new rows
+		byte[] countBytes = new byte[8];
+		String countRow = row + "-count";
+		ByteBuffer.wrap(countBytes).putDouble(1); // initialize count to 1
+		KeyValue countKv =
+				new KeyValue(countRow.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), countBytes);
+		
+		long value = getValueFromPoint(point);
+		byte[] meanBytes = new byte[8];
+		String meanRow = row + "-mean";
+		ByteBuffer.wrap(meanBytes).putDouble(value); // initialize mean to value of data point
+		KeyValue meanKv =
+				new KeyValue(meanRow.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), meanBytes);
+		
+		byte[] stdevBytes = new byte[8];
+		String stdevRow = row + "-standard_deviation";
+		ByteBuffer.wrap(stdevBytes).putDouble(0); // initialize standard deviation to 0
+		KeyValue stdevKv =
+				new KeyValue(stdevRow.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), stdevBytes);
+		
+		byte[] timeBytes = new byte[8];
+		ByteBuffer.wrap(timeBytes).putLong(0L); // initialize last timestamp to 0
+		KeyValue timeKvCount = 
+				new KeyValue(countRow.getBytes(), T_FAMILY, T_QUALIFIER, timeBytes);
+		KeyValue timeKvMean = 
+				new KeyValue(meanRow.getBytes(), T_FAMILY, T_QUALIFIER, timeBytes);
+		KeyValue timeKvStdev = 
+				new KeyValue(stdevRow.getBytes(), T_FAMILY, T_QUALIFIER, timeBytes);
 	
+		PutRequest count = new PutRequest(trends_table, countKv);
+		PutRequest mean = new PutRequest(trends_table, meanKv);
+		PutRequest stdev = new PutRequest(trends_table, stdevKv);
+		PutRequest timeCount = new PutRequest(trends_table, timeKvCount);
+		PutRequest timeMean = new PutRequest(trends_table, timeKvMean);
+		PutRequest timeStdev = new PutRequest(trends_table, timeKvStdev);
+
+		client.put(count);
+		client.put(mean);
+		client.put(stdev);
+		client.put(timeCount);
+		client.put(timeMean);
+		client.put(timeStdev);
+		client.flush();
+		log.info("NEW ROWS ADDED");
+	}
+	
+
 	/**
 	 * Adds a new point, updates the count, mean, and standard
 	 * deviation if it exists. Otherwise, create new rows for
@@ -124,37 +230,89 @@ public class TrendAnalysis {
 	 * @param value
 	 * @param tags
 	 */
-	public void addPoint(String metric,
-			long timestamp, long value, Map<String, String> tags) {
+	public void addPoint(String metric, byte[] value,
+			long timestamp, Map<String, String> tags, short flags) {
 		log.info("trendAnalysis adding point!!!!!!!!!!!!!! !!!!!!!!");
 		
-		// Create ordered list of tag keys and values
+		// add new data point to queue
+		String dataPoint = getDataString(metric, value, timestamp, tags, flags);
+		long currentTime = System.currentTimeMillis() / 1000L;
+
+	    if(queue.containsKey(dataPoint)) {
+	    	log.info("removing " + dataPoint + " from queue");
+	    	queue.remove(dataPoint); // remove and insert to update order
+	    }
+	    log.info("adding " + dataPoint + " to queue");
+    	queue.put(dataPoint, currentTime);
+	}
+	
+	private String getTrendsRowKey(String metric, Map<String, String> tags) {
 		ArrayList<String> tagsList = new ArrayList<String>(tags.keySet());
 		Collections.sort(tagsList);
+		log.info("size of tagsList is======" + tagsList.size());
 		String tagsAndValues = "";
 		for(String tag : tagsList) {
 			tagsAndValues = tagsAndValues + "-" + tag + "=" + tags.get(tag);
 		}
-		
-		// Construct key in allStats table
-		String rowName = metric + tagsAndValues + "-" + getDay(timestamp) + "-" + getHour(timestamp);
-		
-		if(allStats.containsKey(rowName)) { // update stats in memory
-			double[] stats = allStats.get(rowName);
-			log.info("addPoint - updating HBase");
-			log.info("adding : " + stats[0] + " " + stats[1] + " " + stats[2]);
-			double[] newStats = updateStats(stats, value);
-			allStats.put(rowName, newStats);
-			addDataToHBase(rowName, newStats);
-		} else { // store stats in memory
-			double[] stats = {1, value, 0}; // count, mean, standard deviation
-			allStats.put(rowName, stats);
-			log.info("addPoint - creating row in HBase");
-			
-			// initial values for count, mean, and standard deviation
-			double[] initialStats = {1, (double) value, 0};
-			addDataToHBase(rowName, initialStats);
+		log.info("trends row key = " + metric + tagsAndValues);
+		return metric + tagsAndValues;
+	}
+	private String getDataString(String metric, byte[] value,
+			long timestamp, Map<String, String> tags, short flags) {
+		log.info("getDataString!!!!!!!!!!!!!!!!!!");
+		long v = 0;
+		for (int i = 0; i < value.length; i++)
+		{
+		   v += ((long) value[i] & 0xffL) << (8 * i);
 		}
+		return getTrendsRowKey(metric, tags) + "-" + String.valueOf(flags)
+			+ "-" + String.valueOf(timestamp) + "-" + v;
+		
+	}
+	
+	/**
+	 * Given the rowKey, return the metric name.
+	 * @param rowKey
+	 * @return metric
+	 */
+	private String getMetricFromPoint(String point) {
+		return point.split("-")[0];
+	}
+	
+	private short getFlagsFromPoint(String point) {
+		String[] rowData = point.split("-");
+		String flag = rowData[rowData.length-3];
+		return Short.parseShort(flag);
+	}
+	
+	
+	private long getTimestampFromPoint(String point) {
+		String[] rowData = point.split("-");
+		String timestamp = rowData[rowData.length-2];
+		return Long.parseLong(timestamp);
+	}
+	
+	private long getValueFromPoint(String point) {
+		String[] rowData = point.split("-");
+		String value = rowData[rowData.length-1];
+		return Long.parseLong(value);
+	}
+	
+	/**
+	 * Given the rowKey, returns a mapping of the tags to their values.
+	 * @param rowKey
+	 * @return tags
+	 */
+	private Map<String, String> getTagsFromPoint(String point) {
+		log.info("getting tags from point");
+		Map<String, String> tags = new HashMap<String, String>();
+		String[] rowData = point.split("-");
+		// exclude first and last two data (metric, flags, base_time)
+		for(int i = 1; i < rowData.length-3; i++) {
+			String[] tagPair = rowData[i].split("=");
+			tags.put(tagPair[0], tagPair[1]);
+		}
+		return tags;
 	}
 	
 	/**
@@ -172,42 +330,13 @@ public class TrendAnalysis {
 		
 		stats[1] = ((mean * count) + value) / (count + 1); // update mean
 		stats[0] += 1; // update count
-		stats[2] = (double) Math.sqrt((count * Math.pow(stdev, 2) / (count + 1)
+		stats[2] = Math.sqrt((count * Math.pow(stdev, 2) / (count + 1)
 				+ (count / Math.pow((count + 1), 2))
 				* Math.pow((mean - value), 2))); // update standard deviation
 		log.info("updated count = " + stats[0]);
 		log.info("updated mean = " + stats[1]);
 		log.info("updated stdev = " + stats[2]);
 		return stats;
-	}
-	
-	/**
-	 * Initializes allStats from HBase.
-	 */
-	private void initializeAllStats() {
-		try {
-			log.info("initializing all stats");
-			Scanner scanner = client.newScanner(table);
-			ArrayList<ArrayList<KeyValue>> table = scanner.nextRows().join();
-			for(ArrayList<KeyValue> point : table) {
-				double[] stats = new double[3];
-				String rowName = "";
-				for(KeyValue stat : point) {
-					rowName = new String(stat.key());
-					String statName = new String(stat.qualifier());
-					if(statName == "count") {
-						stats[0] = ByteBuffer.wrap(stat.value()).getDouble();
-					} else if (statName == "mean") {
-						stats[1] = ByteBuffer.wrap(stat.value()).getDouble();
-					} else if (statName == "standard_deviation") {
-						stats[2] = ByteBuffer.wrap(stat.value()).getDouble();
-					}
-				}
-				allStats.put(rowName, stats);
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
 	}
 	
 	/**
