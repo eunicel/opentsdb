@@ -140,14 +140,21 @@ public class TrendAnalysis {
 				ArrayList<KeyValue> dataResults = client.get(getData).join();
 				log.info("got results = " + dataResults);
 				ArrayList<Double> newPoints = new ArrayList<Double>();
-				for(int i = dataResults.size()-1; i >= 0; i--) {
+				long latestTimestamp = 0L;
+				int numResults = dataResults.size();
+				for(int i = numResults-1; i >= 0; i--) {
 					KeyValue kv = dataResults.get(i);
 					long dataPointBaseTime = Bytes.getUnsignedInt(kv.key(),
 							tsdb.metrics.width()); // gets base time from row key
-					long dataPointTimestamp = Internal.getTimestampFromQualifier(kv.qualifier(), dataPointBaseTime);
+					long dataPointTimestamp = Internal.getTimestampFromQualifier(kv.qualifier(),
+							dataPointBaseTime);
 					dataPointTimestamp = dataPointTimestamp / 1000L; // convert ms to seconds
 					log.info("TIMESTAMP = " + dataPointTimestamp);
 					if (dataPointTimestamp > storedTimestamp) {
+						if (i == numResults-1) {
+							latestTimestamp = dataPointTimestamp;
+							updateTimeRow(row, latestTimestamp);
+						}
 						long value = bytesToLong(kv.value());
 						newPoints.add((double)value);
 					} else {
@@ -166,6 +173,12 @@ public class TrendAnalysis {
 		}
 	}
 	
+	private void updateTimeRow(String rowKey, long timestamp) {
+		putTimePoint(rowKey + "-count", timestamp);
+		putTimePoint(rowKey + "-mean", timestamp);
+		putTimePoint(rowKey + "-standard_deviation", timestamp);
+	}
+	
 	/**
 	 * Calculate and update trends for row.
 	 * https://en.wikipedia.org/wiki/Standard_deviation#Population-based_statistics
@@ -173,7 +186,8 @@ public class TrendAnalysis {
 	 * @param qualifier
 	 * @param newPoints
 	 */
-	private void updateTrendsRow(String rowKey, byte[] qualifier, ArrayList<Double> values) {
+	private void updateTrendsRow(String rowKey,
+			byte[] qualifier, ArrayList<Double> values) {
 		try {
 			// get old trends
 			double oldCount = getTrendsPoint(rowKey + "-count", qualifier);
@@ -198,8 +212,10 @@ public class TrendAnalysis {
 			double updatedMean = (oldCount * oldMean + newCount * newMean)
 					/ (oldCount + newCount);
 			double updatedStdev = Math.sqrt(
-					(oldCount * Math.pow(oldStdev, 2) + newCount * Math.pow(newStdev, 2)) / (oldCount + newCount)
-					+ ((oldCount * newCount) / (oldCount + newCount)) * Math.pow(oldStdev - newStdev, 2));
+					(oldCount * Math.pow(oldStdev, 2) + newCount * Math.pow(newStdev, 2))
+					/ (oldCount + newCount)
+					+ ((oldCount * newCount) / (oldCount + newCount))
+					* Math.pow(oldStdev - newStdev, 2));
 			
 			// puts updated trends into HBase
 			putTrendsPoint(rowKey + "-count", qualifier, updatedCount);
@@ -216,7 +232,8 @@ public class TrendAnalysis {
 		try {
 			String rowCount = row + "-count"; // get count (if count exists, mean and stdev should too)
 			final byte[] rowCountBytes = rowCount.getBytes();
-			GetRequest getTimestamp = new GetRequest(trends_table, rowCountBytes, T_FAMILY, T_QUALIFIER);
+			GetRequest getTimestamp = new GetRequest(trends_table,
+					rowCountBytes, T_FAMILY, T_QUALIFIER);
 			results = client.get(getTimestamp).join();
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -326,7 +343,8 @@ public class TrendAnalysis {
 	private byte[] getTrendsQualifier(long timestamp) {
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
-		String qualifier = cal.get(Calendar.DAY_OF_WEEK) + "-" + cal.get(Calendar.HOUR_OF_DAY);
+		String qualifier = cal.get(Calendar.DAY_OF_WEEK)
+				+ "-" + cal.get(Calendar.HOUR_OF_DAY);
 		return qualifier.getBytes();
 	}
 	
