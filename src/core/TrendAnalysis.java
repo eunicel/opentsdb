@@ -91,11 +91,11 @@ public class TrendAnalysis {
 					while(iterator.hasNext()) {
 						String point = iterator.next();
 						log.info("looking at row : " + point);
-						long timeAdded = queue.get(point);
-						long currentTime = System.currentTimeMillis() / 1000L;
+						long time_added = queue.get(point);
+						long current_time = System.currentTimeMillis() / 1000L;
 
 						// ensures no more data points will be added to this hour
-						if(currentTime > timeAdded + 20L) { // added > 2 hours ago -- 20 sec for testing
+						if(current_time > time_added + 20L) { // added > 2 hours ago -- 20 sec for testing
 							log.info("row added > 10 sec ago");
 							updateTrendData(point);
 							iterator.remove();
@@ -111,59 +111,56 @@ public class TrendAnalysis {
 		thread.start();
 	}
 
-	private void updateTrendData(String dataPoint) {
+	private void updateTrendData(String point) {
 		try {
 			log.info("updating trend data");
 			// get info from dataPoint
-			String metric = getMetricFromPoint(dataPoint);
-			Map<String, String> tags = getTagsFromPoint(dataPoint);
-			long timestamp = getTimestampFromPoint(dataPoint);
-			short flags = getFlagsFromPoint(dataPoint);
+			String metric = getMetricFromPoint(point);
+			Map<String, String> tags = getTagsFromPoint(point);
+			long timestamp = getTimestampFromPoint(point);
+			short flags = getFlagsFromPoint(point);
 
 			String row = getTrendsRowKey(metric, tags);
 			ArrayList<KeyValue> results = getRowResults(row);
 			if(results.size() == 0) {
-				initializeNewRows(row, dataPoint);
+				initializeNewRows(row, point);
 				results = getRowResults(row);
 			}
 
-			byte[] timestampBytes = results.get(0).value();	// get stored timestamp from trends table
-			long storedTimestamp = ByteBuffer.wrap(timestampBytes).getLong();
-			long pointTimestamp = getTimestampFromPoint(dataPoint); // get timestamp from data point
+			long stored_timestamp = ByteBuffer.wrap(results.get(0).value()).getLong();
+			long point_timestamp = getTimestampFromPoint(point); // get timestamp from data point
 			
-			if (pointTimestamp > storedTimestamp) {
+			if (point_timestamp > stored_timestamp) {
 				log.info("comparing stored with point's timestamp");
-			    byte[] TSDBRowKey = getTSDBRowKey(metric, tags, pointTimestamp);
+			  byte[] TSDBRowKey = getTSDBRowKey(metric, tags, point_timestamp);
 				GetRequest getData = new GetRequest(tsdb_table, TSDBRowKey, T_FAMILY);
 				
 				// look through row backwards to find new data points 
-				ArrayList<KeyValue> dataResults = client.get(getData).join();
-				log.info("got results = " + dataResults);
-				ArrayList<Double> newPoints = new ArrayList<Double>();
-				long latestTimestamp = 0L;
-				int numResults = dataResults.size();
-				for(int i = numResults-1; i >= 0; i--) {
-					KeyValue kv = dataResults.get(i);
-					long dataPointBaseTime = Bytes.getUnsignedInt(kv.key(),
-							tsdb.metrics.width()); // gets base time from row key
-					long dataPointTimestamp = Internal.getTimestampFromQualifier(kv.qualifier(),
-							dataPointBaseTime);
-					dataPointTimestamp = dataPointTimestamp / 1000L; // convert ms to seconds
-					log.info("TIMESTAMP = " + dataPointTimestamp);
-					if (dataPointTimestamp > storedTimestamp) {
-						if (i == numResults-1) {
-							latestTimestamp = dataPointTimestamp;
-							updateTimeRow(row, latestTimestamp);
+				ArrayList<KeyValue> row_results = client.get(getData).join();
+				log.info("got results = " + row_results);
+				ArrayList<Double> new_points = new ArrayList<Double>();
+				long latest_timestamp = 0L;
+				int num_results = row_results.size();
+				for(int i = num_results -1; i >= 0; i--) {
+					KeyValue kv = row_results.get(i);
+					long row_point_timestamp = Internal.getTimestampFromQualifier(kv.qualifier(),
+							Bytes.getUnsignedInt(kv.key(), tsdb.metrics.width())); // base time
+					row_point_timestamp = row_point_timestamp / 1000L; // convert ms to seconds
+					log.info("TIMESTAMP = " + row_point_timestamp);
+					if (row_point_timestamp > stored_timestamp) {
+						if (i == num_results -1) {
+							latest_timestamp = row_point_timestamp;
+							updateTimeRow(row, latest_timestamp);
 						}
 						long value = bytesToLong(kv.value());
-						newPoints.add((double)value);
+						new_points.add((double)value);
 					} else {
 						break;
 					}
 				}
-				byte[] trendsQualifier = getTrendsQualifier(pointTimestamp);
-				String trendsRowKey = getTrendsRowKey(metric, tags);
-				updateTrendsRow(trendsRowKey, trendsQualifier, newPoints);
+				byte[] qualifier = getTrendsQualifier(point_timestamp);
+				String row_key = getTrendsRowKey(metric, tags);
+				updateTrendsRow(row_key, qualifier, new_points);
 			} else {
 				log.info("already updated");
 			}
@@ -173,10 +170,10 @@ public class TrendAnalysis {
 		}
 	}
 	
-	private void updateTimeRow(String rowKey, long timestamp) {
-		putTimePoint(rowKey + "-count", timestamp);
-		putTimePoint(rowKey + "-mean", timestamp);
-		putTimePoint(rowKey + "-standard_deviation", timestamp);
+	private void updateTimeRow(String row_key, long timestamp) {
+		putTimePoint(row_key + "-count", timestamp);
+		putTimePoint(row_key + "-mean", timestamp);
+		putTimePoint(row_key + "-standard_deviation", timestamp);
 	}
 	
 	/**
@@ -186,41 +183,41 @@ public class TrendAnalysis {
 	 * @param qualifier
 	 * @param newPoints
 	 */
-	private void updateTrendsRow(String rowKey,
+	private void updateTrendsRow(String row_key,
 			byte[] qualifier, ArrayList<Double> values) {
 		try {
 			// get old trends
-			double oldCount = getTrendsPoint(rowKey + "-count", qualifier);
-			double oldMean = getTrendsPoint(rowKey + "-mean", qualifier);
-			double oldStdev = getTrendsPoint(rowKey + "-standard_deviation", qualifier);
+			double old_count = getTrendsPoint(row_key + "-count", qualifier);
+			double old_mean = getTrendsPoint(row_key + "-mean", qualifier);
+			double old_stdev = getTrendsPoint(row_key + "-standard_deviation", qualifier);
 		
-			double newCount = values.size();
+			double new_count = values.size();
 			double sum = 0;
 			for(double value : values) {
 				sum += value;
 			}
-			double newMean = sum / newCount;
+			double new_mean = sum / new_count;
 			double diffSqSum = 0;
 			for(double value : values) {
-				diffSqSum += diffSqSum = Math.pow(value - newMean, 2);
+				diffSqSum += diffSqSum = Math.pow(value - new_mean, 2);
 			}
-			double newStdev = diffSqSum / (newCount - 1);
-			double[] results = {newCount, newMean, newStdev};
+			double new_stdev = diffSqSum / (new_count - 1);
+			double[] results = {new_count, new_mean, new_stdev};
 			
 			// update old trends based on new points
-			double updatedCount = oldCount + newCount;
-			double updatedMean = (oldCount * oldMean + newCount * newMean)
-					/ (oldCount + newCount);
-			double updatedStdev = Math.sqrt(
-					(oldCount * Math.pow(oldStdev, 2) + newCount * Math.pow(newStdev, 2))
-					/ (oldCount + newCount)
-					+ ((oldCount * newCount) / (oldCount + newCount))
-					* Math.pow(oldStdev - newStdev, 2));
+			double updated_count = old_count + new_count;
+			double updated_mean = (old_count * old_mean + new_count * new_mean)
+					/ (old_count + new_count);
+			double updated_stdev = Math.sqrt(
+					(old_count * Math.pow(old_stdev, 2) + new_count * Math.pow(new_stdev, 2))
+					/ (old_count + new_count)
+					+ ((old_count * new_count) / (old_stdev + new_count))
+					* Math.pow(old_stdev - new_stdev, 2));
 			
 			// puts updated trends into HBase
-			putTrendsPoint(rowKey + "-count", qualifier, updatedCount);
-			putTrendsPoint(rowKey + "-mean", qualifier, updatedMean);
-			putTrendsPoint(rowKey + "-standard_deviation", qualifier, updatedStdev);
+			putTrendsPoint(row_key + "-count", qualifier, updated_count);
+			putTrendsPoint(row_key + "-mean", qualifier, updated_mean);
+			putTrendsPoint(row_key + "-standard_deviation", qualifier, updated_stdev);
 		
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -230,11 +227,11 @@ public class TrendAnalysis {
 	private ArrayList<KeyValue> getRowResults(String row) {
 		ArrayList<KeyValue> results = new ArrayList<KeyValue>();
 		try {
-			String rowCount = row + "-count"; // get count (if count exists, mean and stdev should too)
-			final byte[] rowCountBytes = rowCount.getBytes();
-			GetRequest getTimestamp = new GetRequest(trends_table,
-					rowCountBytes, T_FAMILY, T_QUALIFIER);
-			results = client.get(getTimestamp).join();
+			String row_count = row + "-count"; // get count (if count exists, mean and stdev should too)
+			final byte[] row_count_bytes = row_count.getBytes();
+			GetRequest request = new GetRequest(trends_table,
+					row_count_bytes, T_FAMILY, T_QUALIFIER);
+			results = client.get(request).join();
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -278,15 +275,15 @@ public class TrendAnalysis {
 		log.info("trendAnalysis adding point!!!!!!!!!!!!!! !!!!!!!!");
 		
 		// add new data point to queue
-		String dataPoint = buildPointString(metric, value, timestamp, tags, flags);
-		long currentTime = System.currentTimeMillis() / 1000L;
+		String point = buildPointString(metric, value, timestamp, tags, flags);
+		long current_time = System.currentTimeMillis() / 1000L;
 
-	    if(queue.containsKey(dataPoint)) {
-	    	log.info("removing " + dataPoint + " from queue");
-	    	queue.remove(dataPoint); // remove and insert to update order
+	    if(queue.containsKey(point)) {
+	    	log.info("removing " + point + " from queue");
+	    	queue.remove(point); // remove and insert to update order
 	    }
-	    log.info("adding " + dataPoint + " to queue");
-    	queue.put(dataPoint, currentTime);
+	    log.info("adding " + point + " to queue");
+    	queue.put(point, current_time);
 	}
 	
 	public void shutdown(){
@@ -302,15 +299,14 @@ public class TrendAnalysis {
 	 * @return trends table row key
 	 */
 	private String getTrendsRowKey(String metric, Map<String, String> tags) {
-		ArrayList<String> tagsList = new ArrayList<String>(tags.keySet());
-		Collections.sort(tagsList);
-		log.info("size of tagsList is======" + tagsList.size());
-		String tagsAndValues = "";
-		for(String tag : tagsList) {
-			tagsAndValues = tagsAndValues + "-" + tag + "=" + tags.get(tag);
+		ArrayList<String> tags_list = new ArrayList<String>(tags.keySet());
+		Collections.sort(tags_list);
+		String tags_and_values = "";
+		for(String tag : tags_list) {
+			tags_and_values += "-" + tag + "=" + tags.get(tag);
 		}
-		log.info("trends row key = " + metric + tagsAndValues);
-		return metric + tagsAndValues;
+		log.info("trends row key = " + metric + tags_and_values);
+		return metric + tags_and_values;
 	}
 	
 	/**
@@ -321,7 +317,7 @@ public class TrendAnalysis {
 	 * @return TSDB table row key
 	 */
 	private byte[] getTSDBRowKey(String metric, Map<String, String> tags, long timestamp) {
-		final byte[] rowKey = IncomingDataPoints.rowKeyTemplate(tsdb, metric, tags);
+		final byte[] row_key = IncomingDataPoints.rowKeyTemplate(tsdb, metric, tags);
 	    final long base_time;
 	    if ((timestamp & Const.SECOND_MASK) != 0) {
 	        base_time = ((timestamp / 1000) - 
@@ -329,8 +325,8 @@ public class TrendAnalysis {
 	      } else {
 	        base_time = (timestamp - (timestamp % Const.MAX_TIMESPAN));
 	      }
-	    Bytes.setInt(rowKey, (int) base_time, tsdb.metrics.width());
-	    return rowKey;
+	    Bytes.setInt(row_key, (int) base_time, tsdb.metrics.width());
+	    return row_key;
 	}
 	
 	/**
@@ -348,26 +344,26 @@ public class TrendAnalysis {
 		return qualifier.getBytes();
 	}
 	
-	private double getTrendsPoint(String rowKey, byte[] qualifier) {
-		byte[] row = rowKey.getBytes();
+	private double getTrendsPoint(String row_key, byte[] qualifier) {
+		byte[] row = row_key.getBytes();
 		GetRequest request = new GetRequest(trends_table, row, TRENDS_FAMILY, qualifier);
 		byte[] bytes = client.get(request).join().get(0).value();
 		double value = ByteBuffer.wrap(bytes).getDouble();
 		return value;
 	}
 	
-	private void putTrendsPoint(String rowKey, byte[] qualifier, double value) {
+	private void putTrendsPoint(String row_key, byte[] qualifier, double value) {
 		byte[] bytes = new byte[8];
 		ByteBuffer.wrap(bytes).putDouble(value);
-		byte[] row = rowKey.getBytes();
+		byte[] row = row_key.getBytes();
 		PutRequest put = new PutRequest(trends_table, row, TRENDS_FAMILY, qualifier, bytes);
 		client.put(put);
 	}
 	
-	private void putTimePoint(String rowKey, long timestamp) {
+	private void putTimePoint(String row_key, long timestamp) {
 		byte[] bytes = new byte[8];
 		ByteBuffer.wrap(bytes).putLong(timestamp);
-		byte[] row = rowKey.getBytes();
+		byte[] row = row_key.getBytes();
 		PutRequest put = new PutRequest(trends_table, row, T_FAMILY, T_QUALIFIER, bytes);
 		client.put(put);
 	}
@@ -378,11 +374,11 @@ public class TrendAnalysis {
 	 * @return long 
 	 */
 	private long bytesToLong(byte[] bytes) {
-		long longValue = 0;
+		long long_value = 0;
 		for (int i = 0; i < bytes.length; i++) {
-			longValue += ((long) bytes[i] & 0xffL) << (8 * i);
+			long_value += ((long) bytes[i] & 0xffL) << (8 * i);
 		}
-		return longValue;
+		return long_value;
 	}
 	
 	/*======== METHODS TO PARSE OR BUILD DATA FOR POINT ============ */
@@ -409,29 +405,29 @@ public class TrendAnalysis {
 	
 	private Map<String, String> getTagsFromPoint(String point) {
 		Map<String, String> tags = new HashMap<String, String>();
-		String[] rowData = point.split("-");
-		for(int i = 1; i < rowData.length-3; i++) {
-			String[] tagPair = rowData[i].split("=");
+		String[] data = point.split("-");
+		for(int i = 1; i < data.length-3; i++) {
+			String[] tagPair = data[i].split("=");
 			tags.put(tagPair[0], tagPair[1]);
 		}
 		return tags;
 	}
 	
 	private short getFlagsFromPoint(String point) {
-		String[] rowData = point.split("-");
-		String flag = rowData[rowData.length-3];
+		String[] data = point.split("-");
+		String flag = data[data.length-3];
 		return Short.parseShort(flag);
 	}
 	
 	private long getTimestampFromPoint(String point) {
-		String[] rowData = point.split("-");
-		String timestamp = rowData[rowData.length-2];
+		String[] data = point.split("-");
+		String timestamp = data[data.length-2];
 		return Long.parseLong(timestamp);
 	}
 	
 	private long getValueFromPoint(String point) {
-		String[] rowData = point.split("-");
-		String value = rowData[rowData.length-1];
+		String[] data = point.split("-");
+		String value = data[data.length-1];
 		return Long.parseLong(value);
 	}
 }
