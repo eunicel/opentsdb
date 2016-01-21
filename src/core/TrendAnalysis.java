@@ -161,9 +161,7 @@ public class TrendAnalysis {
 				byte[] qualifier = getTrendsQualifier(point_timestamp);
 				String row_key = getTrendsRowKey(metric, tags);
 				updateTrendsRow(row_key, qualifier, new_points);
-			} else {
-				log.info("already updated");
-			}
+			} 
 			
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -254,9 +252,9 @@ public class TrendAnalysis {
 		putTrendsPoint(row + "-mean", qualifier, getValueFromPoint(point));
 		putTrendsPoint(row + "-standard_deviation", qualifier, 0);
 		
-		putTimePoint(row + "-count", 0);
-		putTimePoint(row + "-mean", 0);
-		putTimePoint(row + "-standard_deviation", 0);
+		putTimePoint(row + "-count", 0L);
+		putTimePoint(row + "-mean", 0L);
+		putTimePoint(row + "-standard_deviation", 0L);
 		client.flush();
 		log.info("NEW ROWS ADDED");
 	}
