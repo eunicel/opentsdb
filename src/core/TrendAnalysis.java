@@ -223,10 +223,12 @@ public class TrendAnalysis {
 	}
 	
 	private ArrayList<KeyValue> getRowResults(String row) {
+		log.info("getting row " + row);
 		ArrayList<KeyValue> results = new ArrayList<KeyValue>();
 		try {
 			String row_count = row + "-count"; // get count (if count exists, mean and stdev should too)
 			final byte[] row_count_bytes = row_count.getBytes();
+			log.info("row_count_bytes = " + row_count_bytes);
 			GetRequest request = new GetRequest(trends_table,
 					row_count_bytes, T_FAMILY, T_QUALIFIER);
 			results = client.get(request).join();
@@ -343,10 +345,15 @@ public class TrendAnalysis {
 	}
 	
 	private double getTrendsPoint(String row_key, byte[] qualifier) {
-		byte[] row = row_key.getBytes();
-		GetRequest request = new GetRequest(trends_table, row, TRENDS_FAMILY, qualifier);
-		byte[] bytes = client.get(request).join().get(0).value();
-		double value = ByteBuffer.wrap(bytes).getDouble();
+		double value = 0;
+		try {
+			byte[] row = row_key.getBytes();
+			GetRequest request = new GetRequest(trends_table, row, TRENDS_FAMILY, qualifier);
+			byte[] bytes = client.get(request).join().get(0).value();
+			value = ByteBuffer.wrap(bytes).getDouble();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 		return value;
 	}
 	
@@ -374,7 +381,7 @@ public class TrendAnalysis {
 	private long bytesToLong(byte[] bytes) {
 		long long_value = 0;
 		for (int i = 0; i < bytes.length; i++) {
-			long_value += ((long) bytes[i] & 0xffL) << (8 * i);
+			long_value = (long_value << 8) + (bytes[i] & 0xff);
 		}
 		return long_value;
 	}
