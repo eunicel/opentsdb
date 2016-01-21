@@ -60,7 +60,6 @@ public class TrendAnalysis {
 		this.client = client;
 		this.config = config;
 		this.tsdb = tsdb;
-		
 		queue = Collections.synchronizedMap(new LinkedHashMap<String, Long>());
 
 		startThread();
@@ -149,17 +148,13 @@ public class TrendAnalysis {
 					dataPointTimestamp = dataPointTimestamp / 1000L; // convert ms to seconds
 					log.info("TIMESTAMP = " + dataPointTimestamp);
 					if (dataPointTimestamp > storedTimestamp) {
-						long value = 0;
-						for (int j = 0; j < kv.value().length; j++)
-						{
-						   value += ((long) kv.value()[j] & 0xffL) << (8 * j);
-						}
+						long value = bytesToLong(kv.value());
 						newPoints.add((double)value);
 					} else {
 						break;
 					}
 				}
-				String trendsQualifier = getTrendsQualifier(pointTimestamp);
+				byte[] trendsQualifier = getTrendsQualifier(pointTimestamp);
 				String trendsRowKey = getTrendsRowKey(metric, tags);
 				updateTrendsRow(trendsRowKey, trendsQualifier, newPoints);
 			} else {
@@ -178,66 +173,38 @@ public class TrendAnalysis {
 	 * @param qualifier
 	 * @param newPoints
 	 */
-	private void updateTrendsRow(String rowKey, String qualifier, ArrayList<Double> newPoints) {
+	private void updateTrendsRow(String rowKey, byte[] qualifier, ArrayList<Double> values) {
 		try {
 			// get old trends
-			String countRowKey = rowKey + "-count";
-			GetRequest countRequest = new GetRequest(trends_table, countRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes());
-			byte[] countBytes = client.get(countRequest).join().get(0).value();
-			double oldCount = ByteBuffer.wrap(countBytes).getDouble();
-			
-			String meanRowKey = rowKey + "-mean";
-			GetRequest meanRequest = new GetRequest(trends_table, meanRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes());
-			byte[] meanBytes = client.get(countRequest).join().get(0).value();
-			double oldMean = ByteBuffer.wrap(meanBytes).getDouble();
-
-			String stdevRowKey = rowKey + "-standard_deviation";
-			GetRequest stdevRequest = new GetRequest(trends_table, stdevRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes());
-			byte[] stdevBytes = client.get(stdevRequest).join().get(0).value();
-			double oldStdev = ByteBuffer.wrap(stdevBytes).getDouble();
-			
-			// get trends of new points
-			double newCount = newPoints.size();
+			double oldCount = getTrendsPoint(rowKey + "-count", qualifier);
+			double oldMean = getTrendsPoint(rowKey + "-mean", qualifier);
+			double oldStdev = getTrendsPoint(rowKey + "-standard_deviation", qualifier);
+		
+			double newCount = values.size();
 			double sum = 0;
-			for(double point : newPoints) {
-				sum += point;
+			for(double value : values) {
+				sum += value;
 			}
 			double newMean = sum / newCount;
 			double diffSqSum = 0;
-			for(double point : newPoints) {
-				diffSqSum += diffSqSum = Math.pow(point - newMean, 2);
+			for(double value : values) {
+				diffSqSum += diffSqSum = Math.pow(value - newMean, 2);
 			}
 			double newStdev = diffSqSum / (newCount - 1);
+			double[] results = {newCount, newMean, newStdev};
 			
 			// update old trends based on new points
 			double updatedCount = oldCount + newCount;
-			double updatedMean = (oldCount * oldMean + newCount * newMean) / (oldCount + newCount);
+			double updatedMean = (oldCount * oldMean + newCount * newMean)
+					/ (oldCount + newCount);
 			double updatedStdev = Math.sqrt(
 					(oldCount * Math.pow(oldStdev, 2) + newCount * Math.pow(newStdev, 2)) / (oldCount + newCount)
 					+ ((oldCount * newCount) / (oldCount + newCount)) * Math.pow(oldStdev - newStdev, 2));
 			
-			// create KeyValue and PutRequests for updated trends
-			byte[] newCountBytes = new byte[8];
-			ByteBuffer.wrap(newCountBytes).putDouble(updatedCount);
-			KeyValue countKv =
-					new KeyValue(countRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), newCountBytes);
-			byte[] newMeanBytes = new byte[8];
-			ByteBuffer.wrap(newMeanBytes).putDouble(updatedMean); 
-			KeyValue meanKv =
-					new KeyValue(meanRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), newMeanBytes);
-			byte[] newStdevBytes = new byte[8];
-			ByteBuffer.wrap(newStdevBytes).putDouble(updatedStdev); 
-			KeyValue stdevKv =
-					new KeyValue(stdevRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), newStdevBytes);
-			
-			PutRequest c = new PutRequest(trends_table, countKv);
-			PutRequest m = new PutRequest(trends_table, meanKv);
-			PutRequest s = new PutRequest(trends_table, stdevKv);
-			
-			client.put(c);
-			client.put(m);
-			client.put(s);
-			client.flush();
+			// puts updated trends into HBase
+			putTrendsPoint(rowKey + "-count", qualifier, updatedCount);
+			putTrendsPoint(rowKey + "-mean", qualifier, updatedMean);
+			putTrendsPoint(rowKey + "-standard_deviation", qualifier, updatedStdev);
 		
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -266,62 +233,24 @@ public class TrendAnalysis {
 	private void initializeNewRows(String row, String point) {
 		log.info("initializing new rows");
 
-		// build qualifier
 		long timestamp = getTimestampFromPoint(point);
-		String qualifier = getTrendsQualifier(timestamp);
-		
-		// create put requests for new rows
-		byte[] countBytes = new byte[8];
-		String countRow = row + "-count";
-		ByteBuffer.wrap(countBytes).putDouble(1); // initialize count to 1
-		KeyValue countKv =
-				new KeyValue(countRow.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), countBytes);
-		
-		long value = getValueFromPoint(point);
-		byte[] meanBytes = new byte[8];
-		String meanRow = row + "-mean";
-		ByteBuffer.wrap(meanBytes).putDouble(value); // initialize mean to value of data point
-		KeyValue meanKv =
-				new KeyValue(meanRow.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), meanBytes);
-		
-		byte[] stdevBytes = new byte[8];
-		String stdevRow = row + "-standard_deviation";
-		ByteBuffer.wrap(stdevBytes).putDouble(0); // initialize standard deviation to 0
-		KeyValue stdevKv =
-				new KeyValue(stdevRow.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), stdevBytes);
-		
-		byte[] timeBytes = new byte[8];
-		ByteBuffer.wrap(timeBytes).putLong(0L); // initialize last timestamp to 0
-		KeyValue timeKvCount = 
-				new KeyValue(countRow.getBytes(), T_FAMILY, T_QUALIFIER, timeBytes);
-		KeyValue timeKvMean = 
-				new KeyValue(meanRow.getBytes(), T_FAMILY, T_QUALIFIER, timeBytes);
-		KeyValue timeKvStdev = 
-				new KeyValue(stdevRow.getBytes(), T_FAMILY, T_QUALIFIER, timeBytes);
-	
-		PutRequest count = new PutRequest(trends_table, countKv);
-		PutRequest mean = new PutRequest(trends_table, meanKv);
-		PutRequest stdev = new PutRequest(trends_table, stdevKv);
-		PutRequest timeCount = new PutRequest(trends_table, timeKvCount);
-		PutRequest timeMean = new PutRequest(trends_table, timeKvMean);
-		PutRequest timeStdev = new PutRequest(trends_table, timeKvStdev);
+		byte[] qualifier = getTrendsQualifier(timestamp);
 
-		client.put(count);
-		client.put(mean);
-		client.put(stdev);
-		client.put(timeCount);
-		client.put(timeMean);
-		client.put(timeStdev);
+		putTrendsPoint(row + "-count", qualifier, 1);
+		putTrendsPoint(row + "-mean", qualifier, getValueFromPoint(point));
+		putTrendsPoint(row + "-standard_deviation", qualifier, 0);
+		
+		putTimePoint(row + "-count", 0);
+		putTimePoint(row + "-mean", 0);
+		putTimePoint(row + "-standard_deviation", 0);
 		client.flush();
 		log.info("NEW ROWS ADDED");
 	}
-	
 
 	/**
-	 * Adds a new point, updates the count, mean, and standard
-	 * deviation if it exists. Otherwise, create new rows for
-	 * the metric and initialize count, mean, and
-	 * standard deviation according to the newly added point.
+	 * Adds a new point. If it is already in the queue, update
+	 * the timestamp of when it was added and move to end of queue.
+	 * If not already in the queue, then add it with current timestamp.
 	 * @param metric
 	 * @param timestamp
 	 * @param value
@@ -332,7 +261,7 @@ public class TrendAnalysis {
 		log.info("trendAnalysis adding point!!!!!!!!!!!!!! !!!!!!!!");
 		
 		// add new data point to queue
-		String dataPoint = getDataString(metric, value, timestamp, tags, flags);
+		String dataPoint = buildPointString(metric, value, timestamp, tags, flags);
 		long currentTime = System.currentTimeMillis() / 1000L;
 
 	    if(queue.containsKey(dataPoint)) {
@@ -343,6 +272,18 @@ public class TrendAnalysis {
     	queue.put(dataPoint, currentTime);
 	}
 	
+	public void shutdown(){
+		client.flush();
+		client.shutdown();
+	}
+	
+	/*======== GENERAL HELPER METHODS ============ */
+	/**
+	 * Builds the row key in the trends table.
+	 * @param metric
+	 * @param tags
+	 * @return trends table row key
+	 */
 	private String getTrendsRowKey(String metric, Map<String, String> tags) {
 		ArrayList<String> tagsList = new ArrayList<String>(tags.keySet());
 		Collections.sort(tagsList);
@@ -355,6 +296,13 @@ public class TrendAnalysis {
 		return metric + tagsAndValues;
 	}
 	
+	/**
+	 * Gets the row key of the TSDB table that contains the original data.
+	 * @param metric
+	 * @param tags
+	 * @param timestamp
+	 * @return TSDB table row key
+	 */
 	private byte[] getTSDBRowKey(String metric, Map<String, String> tags, long timestamp) {
 		final byte[] rowKey = IncomingDataPoints.rowKeyTemplate(tsdb, metric, tags);
 	    final long base_time;
@@ -368,25 +316,87 @@ public class TrendAnalysis {
 	    return rowKey;
 	}
 	
-	private String getDataString(String metric, byte[] value,
-			long timestamp, Map<String, String> tags, short flags) {
-		log.info("getDataString!!!!!!!!!!!!!!!!!!");
-		long v = 0;
-		for (int i = 0; i < value.length; i++)
-		{
-		   v += ((long) value[i] & 0xffL) << (8 * i);
+	/**
+	 * Given the timestamp, builds and returns the trends table qualifier
+	 * in the format of Day-Hour where Sunday = 1, Monday = 2, etc.
+	 * and 10:04:15.250 PM = 22.
+	 * @param timestamp
+	 * @return trends table qualifier
+	 */
+	private byte[] getTrendsQualifier(long timestamp) {
+		Calendar cal = Calendar.getInstance();
+		cal.setTime(new Date(timestamp * 1000));
+		String qualifier = cal.get(Calendar.DAY_OF_WEEK) + "-" + cal.get(Calendar.HOUR_OF_DAY);
+		return qualifier.getBytes();
+	}
+	
+	private double getTrendsPoint(String rowKey, byte[] qualifier) {
+		byte[] row = rowKey.getBytes();
+		GetRequest request = new GetRequest(trends_table, row, TRENDS_FAMILY, qualifier);
+		byte[] bytes = client.get(request).join().get(0).value();
+		double value = ByteBuffer.wrap(bytes).getDouble();
+		return value;
+	}
+	
+	private void putTrendsPoint(String rowKey, byte[] qualifier, double value) {
+		byte[] bytes = new byte[8];
+		ByteBuffer.wrap(bytes).putDouble(value);
+		byte[] row = rowKey.getBytes();
+		PutRequest put = new PutRequest(trends_table, row, TRENDS_FAMILY, qualifier, bytes);
+		client.put(put);
+	}
+	
+	private void putTimePoint(String rowKey, long timestamp) {
+		byte[] bytes = new byte[8];
+		ByteBuffer.wrap(bytes).putLong(timestamp);
+		byte[] row = rowKey.getBytes();
+		PutRequest put = new PutRequest(trends_table, row, T_FAMILY, T_QUALIFIER, bytes);
+		client.put(put);
+	}
+	
+	/**
+	 * Given a byte array, converts it to a long.
+	 * @param bytes Byte array to convert
+	 * @return long 
+	 */
+	private long bytesToLong(byte[] bytes) {
+		long longValue = 0;
+		for (int i = 0; i < bytes.length; i++) {
+			longValue += ((long) bytes[i] & 0xffL) << (8 * i);
 		}
+		return longValue;
+	}
+	
+	/*======== METHODS TO PARSE OR BUILD DATA FOR POINT ============ */
+	/**
+	 * Given the information about the point, build the String
+	 * that represents the point.
+	 * @param metric
+	 * @param value
+	 * @param timestamp
+	 * @param tags
+	 * @param flags
+	 * @return a String representation of the data point.
+	 */
+	private String buildPointString(String metric, byte[] value,
+			long timestamp, Map<String, String> tags, short flags) {
+		long v = bytesToLong(value);
 		return getTrendsRowKey(metric, tags) + "-" + String.valueOf(flags)
 			+ "-" + String.valueOf(timestamp) + "-" + v;
 	}
 	
-	/**
-	 * Given the rowKey, return the metric name.
-	 * @param rowKey
-	 * @return metric
-	 */
 	private String getMetricFromPoint(String point) {
 		return point.split("-")[0];
+	}
+	
+	private Map<String, String> getTagsFromPoint(String point) {
+		Map<String, String> tags = new HashMap<String, String>();
+		String[] rowData = point.split("-");
+		for(int i = 1; i < rowData.length-3; i++) {
+			String[] tagPair = rowData[i].split("=");
+			tags.put(tagPair[0], tagPair[1]);
+		}
+		return tags;
 	}
 	
 	private short getFlagsFromPoint(String point) {
@@ -394,7 +404,6 @@ public class TrendAnalysis {
 		String flag = rowData[rowData.length-3];
 		return Short.parseShort(flag);
 	}
-	
 	
 	private long getTimestampFromPoint(String point) {
 		String[] rowData = point.split("-");
@@ -406,40 +415,5 @@ public class TrendAnalysis {
 		String[] rowData = point.split("-");
 		String value = rowData[rowData.length-1];
 		return Long.parseLong(value);
-	}
-	
-	/**
-	 * Given the rowKey, returns a mapping of the tags to their values.
-	 * @param rowKey
-	 * @return tags
-	 */
-	private Map<String, String> getTagsFromPoint(String point) {
-		log.info("getting tags from point");
-		Map<String, String> tags = new HashMap<String, String>();
-		String[] rowData = point.split("-");
-		// exclude first and last two data (metric, flags, base_time)
-		for(int i = 1; i < rowData.length-3; i++) {
-			String[] tagPair = rowData[i].split("=");
-			tags.put(tagPair[0], tagPair[1]);
-		}
-		return tags;
-	}
-
-	/**
-	 * Given the timestamp, builds the trends table qualifier in the
-	 * format of Day-Hour where Sunday = 1, Monday = 2, etc.
-	 * and 10:04:15.250 PM = 22.
-	 * @param timestamp
-	 * @return trends table qualifier
-	 */
-	private String getTrendsQualifier(long timestamp) {
-		Calendar cal = Calendar.getInstance();
-		cal.setTime(new Date(timestamp * 1000));
-		return cal.get(Calendar.DAY_OF_WEEK) + "-" + cal.get(Calendar.HOUR_OF_DAY);
-	}
-	
-	public void shutdown(){
-		client.flush();
-		client.shutdown();
 	}
 }
