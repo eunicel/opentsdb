@@ -57,7 +57,6 @@ public class TrendAnalysis {
 	 * @param config
 	 */
 	public TrendAnalysis(HBaseClient client, final Config config, TSDB tsdb){
-		log.info("in TrendAnalysis constructor");
 		this.client = client;
 		this.config = config;
 		this.tsdb = tsdb;
@@ -120,48 +119,126 @@ public class TrendAnalysis {
 			String metric = getMetricFromPoint(dataPoint);
 			Map<String, String> tags = getTagsFromPoint(dataPoint);
 			long timestamp = getTimestampFromPoint(dataPoint);
-			
+			short flags = getFlagsFromPoint(dataPoint);
+
 			String row = getTrendsRowKey(metric, tags);
 			ArrayList<KeyValue> results = getRowResults(row);
-			log.info("row = " + row);
-			log.info("results.size() = " + results.size());
 			if(results.size() == 0) {
 				initializeNewRows(row, dataPoint);
 				results = getRowResults(row);
-				log.info("after initialization. row = " + row);
-				log.info("after intiialization. results.size() = " + results.size());
 			}
 
 			byte[] timestampBytes = results.get(0).value();	// get stored timestamp from trends table
 			long storedTimestamp = ByteBuffer.wrap(timestampBytes).getLong();
-			log.info("stored timestamp = " + storedTimestamp);
 			long pointTimestamp = getTimestampFromPoint(dataPoint); // get timestamp from data point
-			log.info("point timestamp = " + pointTimestamp);
 			
 			if (pointTimestamp > storedTimestamp) {
 				log.info("comparing stored with point's timestamp");
-			    final byte[] rowKey = IncomingDataPoints.rowKeyTemplate(tsdb, metric, tags);
-			    final long base_time;
-			    //final byte[] qualifier = Internal.buildQualifier(timestamp, flags);
-			    if ((timestamp & Const.SECOND_MASK) != 0) {
-			        // drop the ms timestamp to seconds to calculate the base timestamp
-			        base_time = ((timestamp / 1000) - 
-			            ((timestamp / 1000) % Const.MAX_TIMESPAN));
-			      } else {
-			        base_time = (timestamp - (timestamp % Const.MAX_TIMESPAN));
-			      }
-			    Bytes.setInt(rowKey, (int) base_time, tsdb.metrics.width());
-				GetRequest getData = new GetRequest(tsdb_table, rowKey, T_FAMILY);
+			    byte[] TSDBRowKey = getTSDBRowKey(metric, tags, pointTimestamp);
+				GetRequest getData = new GetRequest(tsdb_table, TSDBRowKey, T_FAMILY);
 				
+				// look through row backwards to find new data points 
 				ArrayList<KeyValue> dataResults = client.get(getData).join();
 				log.info("got results = " + dataResults);
-				for(KeyValue kv : dataResults) {
-					log.info("kv timestamp = " + kv.timestamp() + ", " + kv.value().toString());			
+				ArrayList<Double> newPoints = new ArrayList<Double>();
+				for(int i = dataResults.size()-1; i >= 0; i--) {
+					KeyValue kv = dataResults.get(i);
+					long dataPointBaseTime = Bytes.getUnsignedInt(kv.key(),
+							tsdb.metrics.width()); // gets base time from row key
+					long dataPointTimestamp = Internal.getTimestampFromQualifier(kv.qualifier(), dataPointBaseTime);
+					dataPointTimestamp = dataPointTimestamp / 1000L; // convert ms to seconds
+					log.info("TIMESTAMP = " + dataPointTimestamp);
+					if (dataPointTimestamp > storedTimestamp) {
+						long value = 0;
+						for (int j = 0; j < kv.value().length; j++)
+						{
+						   value += ((long) kv.value()[j] & 0xffL) << (8 * j);
+						}
+						newPoints.add((double)value);
+					} else {
+						break;
+					}
 				}
+				String trendsQualifier = getTrendsQualifier(pointTimestamp);
+				String trendsRowKey = getTrendsRowKey(metric, tags);
+				updateTrendsRow(trendsRowKey, trendsQualifier, newPoints);
 			} else {
 				log.info("already updated");
 			}
 			
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	/**
+	 * Calculate and update trends for row.
+	 * https://en.wikipedia.org/wiki/Standard_deviation#Population-based_statistics
+	 * @param rowKey
+	 * @param qualifier
+	 * @param newPoints
+	 */
+	private void updateTrendsRow(String rowKey, String qualifier, ArrayList<Double> newPoints) {
+		try {
+			// get old trends
+			String countRowKey = rowKey + "-count";
+			GetRequest countRequest = new GetRequest(trends_table, countRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes());
+			byte[] countBytes = client.get(countRequest).join().get(0).value();
+			double oldCount = ByteBuffer.wrap(countBytes).getDouble();
+			
+			String meanRowKey = rowKey + "-mean";
+			GetRequest meanRequest = new GetRequest(trends_table, meanRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes());
+			byte[] meanBytes = client.get(countRequest).join().get(0).value();
+			double oldMean = ByteBuffer.wrap(meanBytes).getDouble();
+
+			String stdevRowKey = rowKey + "-standard_deviation";
+			GetRequest stdevRequest = new GetRequest(trends_table, stdevRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes());
+			byte[] stdevBytes = client.get(stdevRequest).join().get(0).value();
+			double oldStdev = ByteBuffer.wrap(stdevBytes).getDouble();
+			
+			// get trends of new points
+			double newCount = newPoints.size();
+			double sum = 0;
+			for(double point : newPoints) {
+				sum += point;
+			}
+			double newMean = sum / newCount;
+			double diffSqSum = 0;
+			for(double point : newPoints) {
+				diffSqSum += diffSqSum = Math.pow(point - newMean, 2);
+			}
+			double newStdev = diffSqSum / (newCount - 1);
+			
+			// update old trends based on new points
+			double updatedCount = oldCount + newCount;
+			double updatedMean = (oldCount * oldMean + newCount * newMean) / (oldCount + newCount);
+			double updatedStdev = Math.sqrt(
+					(oldCount * Math.pow(oldStdev, 2) + newCount * Math.pow(newStdev, 2)) / (oldCount + newCount)
+					+ ((oldCount * newCount) / (oldCount + newCount)) * Math.pow(oldStdev - newStdev, 2));
+			
+			// create KeyValue and PutRequests for updated trends
+			byte[] newCountBytes = new byte[8];
+			ByteBuffer.wrap(newCountBytes).putDouble(updatedCount);
+			KeyValue countKv =
+					new KeyValue(countRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), newCountBytes);
+			byte[] newMeanBytes = new byte[8];
+			ByteBuffer.wrap(newMeanBytes).putDouble(updatedMean); 
+			KeyValue meanKv =
+					new KeyValue(meanRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), newMeanBytes);
+			byte[] newStdevBytes = new byte[8];
+			ByteBuffer.wrap(newStdevBytes).putDouble(updatedStdev); 
+			KeyValue stdevKv =
+					new KeyValue(stdevRowKey.getBytes(), TRENDS_FAMILY, qualifier.getBytes(), newStdevBytes);
+			
+			PutRequest c = new PutRequest(trends_table, countKv);
+			PutRequest m = new PutRequest(trends_table, meanKv);
+			PutRequest s = new PutRequest(trends_table, stdevKv);
+			
+			client.put(c);
+			client.put(m);
+			client.put(s);
+			client.flush();
+		
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -191,9 +268,7 @@ public class TrendAnalysis {
 
 		// build qualifier
 		long timestamp = getTimestampFromPoint(point);
-		int day = getDay(timestamp);
-		int hour = getHour(timestamp);
-		String qualifier = day + "-" + hour;
+		String qualifier = getTrendsQualifier(timestamp);
 		
 		// create put requests for new rows
 		byte[] countBytes = new byte[8];
@@ -279,6 +354,20 @@ public class TrendAnalysis {
 		log.info("trends row key = " + metric + tagsAndValues);
 		return metric + tagsAndValues;
 	}
+	
+	private byte[] getTSDBRowKey(String metric, Map<String, String> tags, long timestamp) {
+		final byte[] rowKey = IncomingDataPoints.rowKeyTemplate(tsdb, metric, tags);
+	    final long base_time;
+	    if ((timestamp & Const.SECOND_MASK) != 0) {
+	        base_time = ((timestamp / 1000) - 
+	            ((timestamp / 1000) % Const.MAX_TIMESPAN));
+	      } else {
+	        base_time = (timestamp - (timestamp % Const.MAX_TIMESPAN));
+	      }
+	    Bytes.setInt(rowKey, (int) base_time, tsdb.metrics.width());
+	    return rowKey;
+	}
+	
 	private String getDataString(String metric, byte[] value,
 			long timestamp, Map<String, String> tags, short flags) {
 		log.info("getDataString!!!!!!!!!!!!!!!!!!");
@@ -335,54 +424,19 @@ public class TrendAnalysis {
 		}
 		return tags;
 	}
-	
+
 	/**
-	 * Updates the stats for a particular row with the new value.
-	 * Updates standard deviation according
-	 * https://en.wikipedia.org/wiki/Standard_deviation#Population-based_statistics
-	 * @param stats An array of count, mean, and standard deviation
-	 * @param value The new value to add
-	 * @return stats The updated coutn, mean, and standard deviation
-	 */
-	private double[] updateStats(double[] stats, long value) {
-		double count = stats[0];
-		double mean = stats[1];
-		double stdev = stats[2];
-		
-		stats[1] = ((mean * count) + value) / (count + 1); // update mean
-		stats[0] += 1; // update count
-		stats[2] = Math.sqrt((count * Math.pow(stdev, 2) / (count + 1)
-				+ (count / Math.pow((count + 1), 2))
-				* Math.pow((mean - value), 2))); // update standard deviation
-		log.info("updated count = " + stats[0]);
-		log.info("updated mean = " + stats[1]);
-		log.info("updated stdev = " + stats[2]);
-		return stats;
-	}
-	
-	/**
-	 * Gets the day of the week given the epoch timestamp.
-	 * Sunday = 1, Monday = 2, Tuesday = 3, etc.
+	 * Given the timestamp, builds the trends table qualifier in the
+	 * format of Day-Hour where Sunday = 1, Monday = 2, etc.
+	 * and 10:04:15.250 PM = 22.
 	 * @param timestamp
+	 * @return trends table qualifier
 	 */
-	private static int getDay(long timestamp) {
+	private String getTrendsQualifier(long timestamp) {
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
-		return cal.get(Calendar.DAY_OF_WEEK);
+		return cal.get(Calendar.DAY_OF_WEEK) + "-" + cal.get(Calendar.HOUR_OF_DAY);
 	}
-	
-	/**
-	 * Gets the hour of the day given the epoch timestamp.
-	 * E.g., at 10:04:15.250 PM getHour will return 22.
-	 * @param timestamp
-	 * @return
-	 */
-	private static int getHour(long timestamp) {
-		Calendar cal = Calendar.getInstance();
-		cal.setTime(new Date(timestamp * 1000));
-		return cal.get(Calendar.HOUR_OF_DAY);
-	}
-	
 	
 	public void shutdown(){
 		client.flush();
