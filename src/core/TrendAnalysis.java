@@ -159,7 +159,6 @@ public class TrendAnalysis {
 					KeyValue kv = row_results.get(i);
 					long row_point_timestamp = Internal.getTimestampFromQualifier(kv.qualifier(),
 							Bytes.getUnsignedInt(kv.key(), tsdb.metrics.width())); // base time
-					row_point_timestamp = row_point_timestamp / 1000L; // convert ms to seconds
 					log.info("row_point_timestamp = " + row_point_timestamp);
 					log.info("stored_timestamp = " + stored_timestamp);
 					if (row_point_timestamp > stored_timestamp) {
@@ -283,9 +282,9 @@ public class TrendAnalysis {
 		putTrendsPoint(row + "-mean", qualifier, getValueFromPoint(point));
 		putTrendsPoint(row + "-standard_deviation", qualifier, 0);
 		
-		putTimePoint(row + "-count", 0L);
-		putTimePoint(row + "-mean", 0L);
-		putTimePoint(row + "-standard_deviation", 0L);
+		putTimePoint(row + "-count", getTimestampFromPoint(point));
+		putTimePoint(row + "-mean", getTimestampFromPoint(point));
+		putTimePoint(row + "-standard_deviation", getTimestampFromPoint(point));
 		log.info("NEW ROWS ADDED");
 	}
 
