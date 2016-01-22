@@ -321,6 +321,7 @@ final class TsdbQuery implements Query {
   @Override
   public DataPoints[] run() throws HBaseException {
     try {
+    	LOG.info("RUNNING A QUERY!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
       return runAsync().joinUninterruptibly();
     } catch (RuntimeException e) {
       throw e;
