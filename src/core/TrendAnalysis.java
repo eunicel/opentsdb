@@ -40,8 +40,8 @@ public class TrendAnalysis {
 	private TSDB tsdb;
 	
 	private static byte[] trends_table = "trends".getBytes();
-	private static final byte[] TRENDS_FAMILY = {'r'};
-	private static final byte[] T_FAMILY = {'t'};
+	private static final byte[] TRENDS_FAMILY = {'r'}; // stores trends
+	private static final byte[] T_FAMILY = {'t'}; // stores latest timestamp
 
 	private static byte[] tsdb_table = "tsdb".getBytes();
 	private static final byte[] T_QUALIFIER = {'t'};
@@ -144,6 +144,8 @@ public class TrendAnalysis {
 			long stored_timestamp = ByteBuffer.wrap(results.get(0).value()).getLong();
 			long point_timestamp = getTimestampFromPoint(point);
 			
+			log.info("point_timestamp = " + point_timestamp);
+			log.info("stored_timestamp = " + stored_timestamp);
 			if (point_timestamp > stored_timestamp) {
 				log.info("comparing stored with point's timestamp");
 			  byte[] tsdb_row_key = getTSDBRowKey(metric, tags, point_timestamp);
@@ -159,15 +161,18 @@ public class TrendAnalysis {
 					KeyValue kv = row_results.get(i);
 					long row_point_timestamp = Internal.getTimestampFromQualifier(kv.qualifier(),
 							Bytes.getUnsignedInt(kv.key(), tsdb.metrics.width())); // base time
+					row_point_timestamp /= 1000L; // convert from ms to sec
 					log.info("row_point_timestamp = " + row_point_timestamp);
 					log.info("stored_timestamp = " + stored_timestamp);
 					if (row_point_timestamp > stored_timestamp) {
 						if (i == num_results -1) { // updated stored timestamp with latest timestamp
 							latest_timestamp = row_point_timestamp;
 							updateTimeRow(row, latest_timestamp);
+							log.info("updated latest stored time to " + row_point_timestamp);
 						}
 						long value = bytesToLong(kv.value());
 						new_points.add((double)value);
+						log.info("added to queue" + (double) value);
 					} else {
 						break;
 					}
@@ -213,12 +218,13 @@ public class TrendAnalysis {
 			double new_count = values.size();
 			double sum = 0;
 			for(double value : values) {
+				log.info("@@@@@@@@adding value to sum : " + value);
 				sum += value;
 			}
 			double new_mean = sum / new_count;
 			double diffSqSum = 0;
 			for(double value : values) {
-				diffSqSum += diffSqSum = Math.pow(value - new_mean, 2);
+				diffSqSum += Math.pow(value - new_mean, 2);
 			}
 			double new_stdev = diffSqSum / new_count;
 			double[] results = {new_count, new_mean, new_stdev};
@@ -329,18 +335,22 @@ public class TrendAnalysis {
 	 * @param trend_name
 	 * @return trend information
 	 */
-	public double getTrendForTimestamp(String metric, Map<String, String> tags,
-			int day, int hour, String trend_name) {
+	public static double getTrendForTimestamp(String metric, Map<String, String> tags,
+			long timestamp, String trend_name) {
 		String row_key = getTrendsRowKey(metric, tags);
 		if(trend_name == "count" || trend_name == "mean" || trend_name == "standard_deviation") {
 			row_key += "-" + trend_name;
+			log.info("row key = " + row_key);
 			final byte[] row = row_key.getBytes();
-			String qualifier_string = day + "-" + hour;
-			final byte[] qualifier = qualifier_string.getBytes();
+			log.info("timestamp = " + timestamp);
+			final byte[] qualifier = getTrendsQualifier(timestamp / 1000L);
+			log.info("getting: row = " + row + " family = " + String.valueOf(TRENDS_FAMILY) + " qualifier = " + String.valueOf(qualifier));
 			GetRequest request = new GetRequest(trends_table, row, TRENDS_FAMILY, qualifier);
 			try {
 				byte[] result = client.get(request).join().get(0).value();
-				return ByteBuffer.wrap(result).getDouble();
+				double trend = ByteBuffer.wrap(result).getDouble();
+				log.info("RETURNING TREND = " + trend);
+				return trend;
 			} catch (Exception e) {
 				e.printStackTrace();
 				log.info("ERROR: cannot get trends");
@@ -359,7 +369,7 @@ public class TrendAnalysis {
 	 * @param tags
 	 * @return trends table row key
 	 */
-	private String getTrendsRowKey(String metric, Map<String, String> tags) {
+	private static String getTrendsRowKey(String metric, Map<String, String> tags) {
 		ArrayList<String> tags_list = new ArrayList<String>(tags.keySet());
 		Collections.sort(tags_list);
 		String tags_and_values = "";
@@ -396,11 +406,12 @@ public class TrendAnalysis {
 	 * @param timestamp
 	 * @return trends table qualifier
 	 */
-	private byte[] getTrendsQualifier(long timestamp) {
+	private static byte[] getTrendsQualifier(long timestamp) {
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(new Date(timestamp * 1000));
 		String qualifier = cal.get(Calendar.DAY_OF_WEEK)
 				+ "-" + cal.get(Calendar.HOUR_OF_DAY);
+		log.info("qualifier = " + qualifier);
 		return qualifier.getBytes();
 	}
 	
@@ -418,7 +429,7 @@ public class TrendAnalysis {
 	}
 	
 	private void putTrendsPoint(String row_key, byte[] qualifier, double value) {
-		log.info("updating " + row_key + " value to " + value);
+		log.info("updating " + row_key + " value to " + value + "###################");
 		byte[] bytes = new byte[8];
 		ByteBuffer.wrap(bytes).putDouble(value);
 		byte[] row = row_key.getBytes();

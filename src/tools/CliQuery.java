@@ -233,6 +233,7 @@ final class CliQuery {
       if (i < args.length && args[i].indexOf(' ', 1) > 0) {
         plotoptions.add(args[i++]);
       }
+      LOG.info("CliQuery!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
       final Query query = tsdb.newQuery();
       query.setStartTime(start_ts);
       if (end_ts > 0) {

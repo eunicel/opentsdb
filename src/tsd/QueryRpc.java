@@ -358,6 +358,7 @@ final class QueryRpc implements HttpRpc {
    * @throws BadRequestException if parsing was unsuccessful
    */
   private TSQuery parseQuery(final TSDB tsdb, final HttpQuery query) {
+  	LOG.info("parseQuery !!!!!!!!!!!!!");
     final TSQuery data_query = new TSQuery();
     
     data_query.setStart(query.getRequiredQueryStringParam("start"));
@@ -390,12 +391,17 @@ final class QueryRpc implements HttpRpc {
         this.parseTsuidTypeSubQuery(q, data_query);
       }
     }
-    
+
     if (query.hasQueryStringParam("m")) {
-      final List<String> legacy_queries = query.getQueryStringParams("m");      
+      final List<String> legacy_queries = query.getQueryStringParams("m");
       for (String q : legacy_queries) {
         this.parseMTypeSubQuery(q, data_query);
       }
+    }
+    
+    if (query.hasQueryStringParam("show_trends")) {
+    	LOG.info("has trends query string param");
+    	data_query.setShowTrends(true);
     }
     
     if (data_query.getQueries() == null || data_query.getQueries().size() < 1) {

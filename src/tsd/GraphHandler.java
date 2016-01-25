@@ -856,6 +856,7 @@ final class GraphHandler implements HttpRpc {
       if (rate) {
         i--;  // Move to the next part.
       }
+      LOG.info("GraphHandler!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
       final Query tsdbquery = tsdb.newQuery();
       try {
         tsdbquery.setTimeSeries(metric, parsedtags, agg, rate, rate_options);

@@ -38,6 +38,7 @@ import net.opentsdb.core.DataPoints;
 import net.opentsdb.core.IncomingDataPoint;
 import net.opentsdb.core.TSDB;
 import net.opentsdb.core.TSQuery;
+import net.opentsdb.core.TrendAnalysis;
 import net.opentsdb.meta.Annotation;
 import net.opentsdb.meta.TSMeta;
 import net.opentsdb.meta.UIDMeta;
@@ -651,6 +652,41 @@ class HttpJsonSerializer extends HttpSerializer {
             }
             json.writeEndObject();
           }
+          
+          if(data_query.getShowTrends()) {
+          	json.writeFieldName("trends");
+          	json.writeStartObject();
+          	json.writeFieldName("mean");
+          	json.writeStartObject();
+          	for (final DataPoint dp : dps) {
+          		if (dp.timestamp() < (data_query.startTime()) || 
+                  dp.timestamp() > (data_query.endTime())) {
+                continue;
+              }
+          		final long timestamp = data_query.getMsResolution() ? 
+                  dp.timestamp() : dp.timestamp() / 1000;
+              final double mean = TrendAnalysis.getTrendForTimestamp(dps.metricName(),
+              		dps.getTags(), dp.timestamp(), "mean");
+          		json.writeNumberField(Long.toString(timestamp), mean);
+          	}
+          	json.writeEndObject();
+          }
+
+        	json.writeFieldName("standard_deviation");
+        	json.writeStartObject();
+        	for (final DataPoint dp : dps) {
+        		if (dp.timestamp() < (data_query.startTime()) || 
+                dp.timestamp() > (data_query.endTime())) {
+              continue;
+            }
+        		final long timestamp = data_query.getMsResolution() ? 
+                dp.timestamp() : dp.timestamp() / 1000;
+            final double mean = TrendAnalysis.getTrendForTimestamp(dps.metricName(),
+            		dps.getTags(), dp.timestamp(), "standard_deviation");
+        		json.writeNumberField(Long.toString(timestamp), mean);
+        	}
+        	json.writeEndObject();
+          json.writeEndObject();
 
           // close the results for this particular query
           json.writeEndObject();

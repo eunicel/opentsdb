@@ -17,6 +17,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import net.opentsdb.utils.DateTime;
 
 /**
@@ -75,6 +78,9 @@ public final class TSQuery {
   /** Whether or not the user wasn't millisecond resolution */
   private boolean ms_resolution;
   
+  /** Whether or not to show trends when returning data */
+  private boolean show_trends;
+  
   /**
    * Default constructor necessary for POJO de/serialization
    */
@@ -132,6 +138,7 @@ public final class TSQuery {
     final Query[] queries = new Query[this.queries.size()];
     int i = 0;
     for (TSSubQuery sub : this.queries) {
+    	Logger LOG = LoggerFactory.getLogger(TrendAnalysis.class);
       final Query query = tsdb.newQuery();
       query.setStartTime(start_time);
       query.setEndTime(end_time);
@@ -271,6 +278,11 @@ public final class TSQuery {
     return ms_resolution;
   }
   
+  /** @return whether or not to display trends with the results */
+  public boolean getShowTrends() {
+  	return show_trends;
+  }
+  
   /**
    * Sets the start time for further parsing. This can be an absolute or 
    * relative value. See {@link DateTime#parseDateTimeString} for details.
@@ -328,5 +340,10 @@ public final class TSQuery {
   /** @param ms_resolution whether or not the user wants millisecond resolution */
   public void setMsResolution(boolean ms_resolution) {
     this.ms_resolution = ms_resolution;
+  }
+  
+  /** @param show_trends whether or not to show trends in output */
+  public void setShowTrends(boolean show_trends) {
+  	this.show_trends = show_trends;
   }
 }
