@@ -240,7 +240,7 @@ public class TrendAnalysis {
 			double updated_stdev = Math.sqrt(
 					(old_count * Math.pow(old_stdev, 2) + new_count * Math.pow(new_stdev, 2))
 					/ (old_count + new_count)
-					+ ((old_count * new_count) / (old_count + new_count))
+					+ ((old_count * new_count) / Math.pow((old_count + new_count), 2))
 					* Math.pow(old_mean - new_mean, 2));
 			
 			log.info("updated_count = " + updated_count);
