@@ -127,59 +127,62 @@ public class TrendAnalysis {
 			// get info from dataPoint
 			String metric = getMetricFromPoint(point);
 			Map<String, String> tags = getTagsFromPoint(point);
-			long timestamp = getTimestampFromPoint(point);
+			long point_timestamp = getTimestampFromPoint(point);
 			short flags = getFlagsFromPoint(point);
 
 			String row = getTrendsRowKey(metric, tags);
 			ArrayList<KeyValue> results = getRowResults(row);
-			if(results.size() == 0) {
+			byte[] qualifier = getTrendsQualifier(point_timestamp);
+			if(!rowColumnExists(row, qualifier)) {
 				initializeNewRows(row, point);
-			}
-			
-			// wait until initialized rows has been flushed
-			while(results.size() == 0) {
-				results = getRowResults(row);
-			}
-			
-			long stored_timestamp = ByteBuffer.wrap(results.get(0).value()).getLong();
-			long point_timestamp = getTimestampFromPoint(point);
-			
-			log.info("point_timestamp = " + point_timestamp);
-			log.info("stored_timestamp = " + stored_timestamp);
-			if (point_timestamp > stored_timestamp) {
-				log.info("comparing stored with point's timestamp");
-			  byte[] tsdb_row_key = getTSDBRowKey(metric, tags, point_timestamp);
-				GetRequest getData = new GetRequest(tsdb_table, tsdb_row_key, T_FAMILY);
-				
-				// look through row backwards to find new data points 
-				ArrayList<KeyValue> row_results = client.get(getData).join();
-				log.info("got results = " + row_results);
-				ArrayList<Double> new_points = new ArrayList<Double>();
-				long latest_timestamp = 0L;
-				int num_results = row_results.size();
-				for(int i = num_results -1; i >= 0; i--) {
-					KeyValue kv = row_results.get(i);
-					long row_point_timestamp = Internal.getTimestampFromQualifier(kv.qualifier(),
-							Bytes.getUnsignedInt(kv.key(), tsdb.metrics.width())); // base time
-					row_point_timestamp /= 1000L; // convert from ms to sec
-					log.info("row_point_timestamp = " + row_point_timestamp);
-					log.info("stored_timestamp = " + stored_timestamp);
-					if (row_point_timestamp > stored_timestamp) {
-						if (i == num_results -1) { // updated stored timestamp with latest timestamp
-							latest_timestamp = row_point_timestamp;
-							updateTimeRow(row, latest_timestamp);
-							log.info("updated latest stored time to " + row_point_timestamp);
-						}
-						long value = bytesToLong(kv.value());
-						new_points.add((double)value);
-						log.info("added to queue" + (double) value);
-					} else {
-						break;
-					}
+			} else {
+				// wait until initialized rows has been flushed
+				while(results.size() == 0) {
+					results = getRowResults(row);
 				}
-				byte[] qualifier = getTrendsQualifier(point_timestamp);
-				String row_key = getTrendsRowKey(metric, tags);
-				updateTrendsRow(row_key, qualifier, new_points);
+				
+				long stored_timestamp = ByteBuffer.wrap(results.get(0).value()).getLong();
+				
+				log.info("point_timestamp = " + point_timestamp);
+				log.info("stored_timestamp = " + stored_timestamp);
+				if (point_timestamp > stored_timestamp) {
+					log.info("comparing stored with point's timestamp");
+				  byte[] tsdb_row_key = getTSDBRowKey(metric, tags, point_timestamp);
+				  final byte[] tsdb_qualifier = Internal.buildQualifier(point_timestamp, flags);
+				  log.info("tsdb_row_key = " + String.valueOf(tsdb_row_key));
+					GetRequest getData = new GetRequest(tsdb_table, tsdb_row_key, T_FAMILY, tsdb_qualifier);
+					
+					// look through row backwards to find new data points 
+					ArrayList<KeyValue> row_results = client.get(getData).join();
+					log.info("got results = " + row_results);
+					ArrayList<Double> new_points = new ArrayList<Double>();
+					long latest_timestamp = 0L;
+					int num_results = row_results.size();
+					for(int i = num_results -1; i >= 0; i--) {
+						KeyValue kv = row_results.get(i);
+						long row_point_timestamp = Internal.getTimestampFromQualifier(kv.qualifier(),
+								Bytes.getUnsignedInt(kv.key(), tsdb.metrics.width())); // base time
+						row_point_timestamp /= 1000L; // convert from ms to sec
+						log.info("row_point_timestamp = " + row_point_timestamp);
+						log.info("stored_timestamp = " + stored_timestamp);
+						if (row_point_timestamp > stored_timestamp) {
+							log.info("updating!!!!!!");
+							if (i == num_results -1) { // updated stored timestamp with latest timestamp
+								latest_timestamp = row_point_timestamp;
+								updateTimeRow(row, latest_timestamp);
+								log.info("updated latest stored time to " + row_point_timestamp);
+							}
+							long value = bytesToLong(kv.value());
+							new_points.add((double)value);
+							log.info("added to queue" + (double) value);
+							String row_key = getTrendsRowKey(metric, tags);
+							updateTrendsRow(row_key, qualifier, new_points);
+						} else {
+							break;
+						}
+					}
+					
+				}
 			}
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -208,6 +211,7 @@ public class TrendAnalysis {
 			byte[] qualifier, ArrayList<Double> values) {
 		try {
 			// get old trends
+			log.info("updatedTrendsRow qualifier = " + String.valueOf(qualifier));
 			double old_count = getTrendsPoint(row_key + "-count", qualifier);
 			double old_mean = getTrendsPoint(row_key + "-mean", qualifier);
 			double old_stdev = getTrendsPoint(row_key + "-standard_deviation", qualifier);
@@ -218,7 +222,6 @@ public class TrendAnalysis {
 			double new_count = values.size();
 			double sum = 0;
 			for(double value : values) {
-				log.info("@@@@@@@@adding value to sum : " + value);
 				sum += value;
 			}
 			double new_mean = sum / new_count;
@@ -257,6 +260,26 @@ public class TrendAnalysis {
 		}
 	}
 	
+	private boolean rowColumnExists(String row, byte[] qualifier) {
+		ArrayList<KeyValue> results = new ArrayList<KeyValue>();
+		try {
+			String row_count = row + "-count"; // get count (if count exists, mean and stdev should too)
+			final byte[] row_count_bytes = row_count.getBytes();
+			GetRequest request = new GetRequest(trends_table,
+					row_count_bytes, TRENDS_FAMILY, qualifier);
+			results = client.get(request).join();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		if (results.size() == 0) {
+			log.info("ROW COLUMN DOES NOT EXIST!!!!");
+			return false;
+		} else {
+			log.info("ROW COLUMN DOES EXIST!!!!");
+			return true;
+		}
+	}
+	
 	private ArrayList<KeyValue> getRowResults(String row) {
 		ArrayList<KeyValue> results = new ArrayList<KeyValue>();
 		try {
@@ -282,15 +305,16 @@ public class TrendAnalysis {
 
 		long timestamp = getTimestampFromPoint(point);
 		byte[] qualifier = getTrendsQualifier(timestamp);
- 
+		
 		log.info("initializing this row: " + row + "-count");
 		putTrendsPoint(row + "-count", qualifier, 1);
 		putTrendsPoint(row + "-mean", qualifier, getValueFromPoint(point));
 		putTrendsPoint(row + "-standard_deviation", qualifier, 0);
 		
-		putTimePoint(row + "-count", getTimestampFromPoint(point));
-		putTimePoint(row + "-mean", getTimestampFromPoint(point));
-		putTimePoint(row + "-standard_deviation", getTimestampFromPoint(point));
+		putTimePoint(row + "-count", timestamp);
+		putTimePoint(row + "-mean", timestamp);
+		putTimePoint(row + "-standard_deviation", timestamp);
+		
 		log.info("NEW ROWS ADDED");
 	}
 
@@ -347,9 +371,16 @@ public class TrendAnalysis {
 			log.info("getting: row = " + row + " family = " + String.valueOf(TRENDS_FAMILY) + " qualifier = " + String.valueOf(qualifier));
 			GetRequest request = new GetRequest(trends_table, row, TRENDS_FAMILY, qualifier);
 			try {
-				byte[] result = client.get(request).join().get(0).value();
-				double trend = ByteBuffer.wrap(result).getDouble();
-				log.info("RETURNING TREND = " + trend);
+				long startTime = System.currentTimeMillis(); //fetch starting time
+				ArrayList<KeyValue> result = client.get(request).join();
+				double trend = 0;
+				if(result.size() > 0) {
+					byte[] result_value = result.get(0).value();
+					trend = ByteBuffer.wrap(result_value).getDouble();
+					log.info("RETURNING TREND = " + trend);
+				} else {
+					throw new Exception();
+				} 
 				return trend;
 			} catch (Exception e) {
 				e.printStackTrace();
@@ -419,7 +450,7 @@ public class TrendAnalysis {
 		double value = 0;
 		try {
 			byte[] row = row_key.getBytes();
-			GetRequest request = new GetRequest(trends_table, row, TRENDS_FAMILY);
+			GetRequest request = new GetRequest(trends_table, row, TRENDS_FAMILY, qualifier);
 			byte[] bytes = client.get(request).join().get(0).value();
 			value = ByteBuffer.wrap(bytes).getDouble();
 		} catch (Exception e) {
