@@ -86,7 +86,7 @@ public class TrendAnalysis {
 				while(true) {
 					try{
 						log.info("start sleep");
-						Thread.sleep(20000); // Sleeps for 2 hours -- 20 sec for testing
+						Thread.sleep(7200000); // Sleeps for 2 hours 
 						log.info("done sleeping");
 					} catch (Exception e) {
 						e.printStackTrace();
@@ -101,7 +101,7 @@ public class TrendAnalysis {
 						long current_time = System.currentTimeMillis() / 1000L;
 
 						// ensures no more data points will be added to this hour
-						if(current_time > time_added + 20L) { // added > 2 hours ago -- 20 sec for testing
+						if(current_time > time_added + 7200L) { // added > 2 hours ago
 							log.info("row added > 10 sec ago");
 							updateTrendData(point);
 							iterator.remove();
