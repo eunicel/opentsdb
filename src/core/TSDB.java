@@ -593,7 +593,6 @@ public final class TSDB {
                                    final Map<String, String> tags) {
     final Logger LOG = LoggerFactory.getLogger(TSDB.class);
 
-	LOG.info("addPoint!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     final byte[] v;
     if (Byte.MIN_VALUE <= value && value <= Byte.MAX_VALUE) {
       v = new byte[] { (byte) value };
@@ -687,8 +686,6 @@ public final class TSDB {
                                             final Map<String, String> tags,
                                             final short flags) {
 	final Logger LOG = LoggerFactory.getLogger(TSDB.class);
-
-	LOG.info("add point internal!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 	trendAnalysis.addPoint(metric, value, timestamp, tags, flags);
 
 	// we only accept positive unix epoch timestamps in seconds or milliseconds
