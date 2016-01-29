@@ -46,7 +46,7 @@ public class TrendAnalysis {
 	private static byte[] tsdb_table = "tsdb".getBytes();
 	private static final byte[] T_QUALIFIER = {'t'};
 	
-	private Map<String, Long> queue;
+	private Map<String, String> queue;
 	
 	static Logger log = LoggerFactory.getLogger(TrendAnalysis.class);
 
@@ -60,7 +60,7 @@ public class TrendAnalysis {
 		this.client = client;
 		this.config = config;
 		this.tsdb = tsdb;
-		queue = Collections.synchronizedMap(new LinkedHashMap<String, Long>());
+		queue = Collections.synchronizedMap(new LinkedHashMap<String, String>());
 		startThread();
 	}
 	
@@ -96,7 +96,8 @@ public class TrendAnalysis {
 					while(iterator.hasNext()) {
 						String point = iterator.next();
 						log.info("looking at row : " + point);
-						long time_added = queue.get(point);
+						String[] point_data= queue.get(point).split("-");
+						long time_added = Long.parseLong(point_data[0]);
 						long current_time = System.currentTimeMillis() / 1000L;
 
 						// ensures no more data points will be added to this hour
@@ -288,10 +289,12 @@ public class TrendAnalysis {
 	private void initializeNewRows(String row, String point) {
 		long timestamp = getTimestampFromPoint(point);
 		byte[] qualifier = getTrendsQualifier(timestamp);
+		String[] point_data = queue.get(point).split("-");
+		long value = Long.parseLong(point_data[1]);
 		
 		log.info("initializing this row: " + row + "-count");
 		putTrendsPoint(row + "-count", qualifier, 1);
-		putTrendsPoint(row + "-mean", qualifier, getValueFromPoint(point));
+		putTrendsPoint(row + "-mean", qualifier, (double) value);
 		putTrendsPoint(row + "-standard_deviation", qualifier, 0);
 		
 		putTimePoint(row + "-count", timestamp);
@@ -315,7 +318,7 @@ public class TrendAnalysis {
 		log.info("trendAnalysis adding point!!!!!!!!!!!!!! !!!!!!!!");
 		
 		// add new data point to queue
-		String point = buildPointString(metric, value, timestamp, tags, flags);
+		String point = buildPointString(metric, timestamp, tags);
 		long current_time = System.currentTimeMillis() / 1000L;
 
 	    if(queue.containsKey(point)) {
@@ -323,7 +326,7 @@ public class TrendAnalysis {
 	    	queue.remove(point); // remove and insert to update order
 	    }
 	    log.info("adding " + point + " to queue");
-    	queue.put(point, current_time);
+    	queue.put(point, current_time + "-" + bytesToLong(value));
 	}
 	
 	public void shutdown(){
@@ -486,11 +489,9 @@ public class TrendAnalysis {
 	 * @param flags
 	 * @return a String representation of the data point.
 	 */
-	private String buildPointString(String metric, byte[] value,
-			long timestamp, Map<String, String> tags, short flags) {
-		long v = bytesToLong(value);
-		return getTrendsRowKey(metric, tags) + "-" + String.valueOf(flags)
-			+ "-" + String.valueOf(timestamp) + "-" + v;
+	private String buildPointString(String metric,
+			long timestamp, Map<String, String> tags) {
+		return getTrendsRowKey(metric, tags) + "-" + String.valueOf(timestamp);
 	}
 	
 	private String getMetricFromPoint(String point) {
@@ -500,28 +501,17 @@ public class TrendAnalysis {
 	private Map<String, String> getTagsFromPoint(String point) {
 		Map<String, String> tags = new HashMap<String, String>();
 		String[] data = point.split("-");
-		for(int i = 1; i < data.length-3; i++) {
+		for(int i = 1; i < data.length-1; i++) {
 			String[] tagPair = data[i].split("=");
 			tags.put(tagPair[0], tagPair[1]);
 		}
 		return tags;
 	}
 	
-	private short getFlagsFromPoint(String point) {
-		String[] data = point.split("-");
-		String flag = data[data.length-3];
-		return Short.parseShort(flag);
-	}
-	
 	private long getTimestampFromPoint(String point) {
 		String[] data = point.split("-");
-		String timestamp = data[data.length-2];
+		String timestamp = data[data.length-1];
 		return Long.parseLong(timestamp);
 	}
-	
-	private long getValueFromPoint(String point) {
-		String[] data = point.split("-");
-		String value = data[data.length-1];
-		return Long.parseLong(value);
-	}
+
 }
