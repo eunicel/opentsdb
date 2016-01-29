@@ -128,7 +128,6 @@ public class TrendAnalysis {
 			String metric = getMetricFromPoint(point);
 			Map<String, String> tags = getTagsFromPoint(point);
 			long point_timestamp = getTimestampFromPoint(point);
-			short flags = getFlagsFromPoint(point);
 
 			String row = getTrendsRowKey(metric, tags);
 			ArrayList<KeyValue> results = getRowResults(row);
@@ -148,7 +147,6 @@ public class TrendAnalysis {
 				if (point_timestamp > stored_timestamp) {
 					log.info("comparing stored with point's timestamp");
 				  byte[] tsdb_row_key = getTSDBRowKey(metric, tags, point_timestamp);
-				  final byte[] tsdb_qualifier = Internal.buildQualifier(point_timestamp, flags);
 				  log.info("tsdb_row_key = " + String.valueOf(tsdb_row_key));
 					GetRequest getData = new GetRequest(tsdb_table, tsdb_row_key, T_FAMILY);
 					
@@ -219,9 +217,6 @@ public class TrendAnalysis {
 			double old_count = getTrendsPoint(row_key + "-count", qualifier);
 			double old_mean = getTrendsPoint(row_key + "-mean", qualifier);
 			double old_stdev = getTrendsPoint(row_key + "-standard_deviation", qualifier);
-		  log.info("OLD COUNT = " + old_count);
-		  log.info("OLD MEAN = " + old_mean);
-		  log.info("OLD STDEV = " + old_stdev);
 		  
 			double new_count = values.size();
 			double sum = 0;
@@ -236,10 +231,6 @@ public class TrendAnalysis {
 			double new_stdev = diffSqSum / new_count;
 			double[] results = {new_count, new_mean, new_stdev};
 			
-			log.info("NEW COUNT = " + new_count);
-			log.info("NEW MEAN = " + new_mean);
-			log.info("NEW STDEV = " + new_stdev);
-			
 			// update old trends based on new points
 			double updated_count = old_count + new_count;
 			double updated_mean = (old_count * old_mean + new_count * new_mean)
@@ -249,11 +240,7 @@ public class TrendAnalysis {
 					/ (old_count + new_count)
 					+ ((old_count * new_count) / Math.pow((old_count + new_count), 2))
 					* Math.pow(old_mean - new_mean, 2));
-			
-			log.info("updated_count = " + updated_count);
-			log.info("updated_mean = " + updated_mean);
-			log.info("updated_stdev = " + updated_stdev);
-			
+
 			// puts updated trends into HBase
 			putTrendsPoint(row_key + "-count", qualifier, updated_count);
 			putTrendsPoint(row_key + "-mean", qualifier, updated_mean);
@@ -275,13 +262,7 @@ public class TrendAnalysis {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-		if (results.size() == 0) {
-			log.info("ROW COLUMN DOES NOT EXIST!!!!");
-			return false;
-		} else {
-			log.info("ROW COLUMN DOES EXIST!!!!");
-			return true;
-		}
+		return results.size() != 0;
 	}
 	
 	private ArrayList<KeyValue> getRowResults(String row) {
@@ -305,8 +286,6 @@ public class TrendAnalysis {
 	 * @param point
 	 */
 	private void initializeNewRows(String row, String point) {
-		log.info("initializing new rows");
-
 		long timestamp = getTimestampFromPoint(point);
 		byte[] qualifier = getTrendsQualifier(timestamp);
 		
