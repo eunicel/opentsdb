@@ -496,15 +496,6 @@ public class TrendAnalysis {
 		return long_value;
 	}
 	
-	private long bytesToLongLeast(byte[] bytes) {
-		long value = 0;
-		for (int i = 0; i < bytes.length; i++)
-		{
-		   value += ((long) bytes[i] & 0xffL) << (8 * i);
-		}
-		return value;
-	}
-	
 	/*======== METHODS TO PARSE OR BUILD DATA FOR POINT ============ */
 	/**
 	 * Given the information about the point, build the String
