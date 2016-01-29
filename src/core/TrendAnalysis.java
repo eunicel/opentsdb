@@ -150,38 +150,42 @@ public class TrendAnalysis {
 				  byte[] tsdb_row_key = getTSDBRowKey(metric, tags, point_timestamp);
 				  final byte[] tsdb_qualifier = Internal.buildQualifier(point_timestamp, flags);
 				  log.info("tsdb_row_key = " + String.valueOf(tsdb_row_key));
-					GetRequest getData = new GetRequest(tsdb_table, tsdb_row_key, T_FAMILY, tsdb_qualifier);
+					GetRequest getData = new GetRequest(tsdb_table, tsdb_row_key, T_FAMILY);
 					
-					// look through row backwards to find new data points 
-					ArrayList<KeyValue> row_results = client.get(getData).join();
-					log.info("got results = " + row_results);
-					ArrayList<Double> new_points = new ArrayList<Double>();
-					long latest_timestamp = 0L;
-					int num_results = row_results.size();
-					for(int i = num_results -1; i >= 0; i--) {
-						KeyValue kv = row_results.get(i);
-						long row_point_timestamp = Internal.getTimestampFromQualifier(kv.qualifier(),
-								Bytes.getUnsignedInt(kv.key(), tsdb.metrics.width())); // base time
-						row_point_timestamp /= 1000L; // convert from ms to sec
-						log.info("row_point_timestamp = " + row_point_timestamp);
-						log.info("stored_timestamp = " + stored_timestamp);
-						if (row_point_timestamp > stored_timestamp) {
-							log.info("updating!!!!!!");
-							if (i == num_results -1) { // updated stored timestamp with latest timestamp
-								latest_timestamp = row_point_timestamp;
-								updateTimeRow(row, latest_timestamp);
-								log.info("updated latest stored time to " + row_point_timestamp);
+					// look through row backwards to find new data points
+					final Query query = tsdb.newQuery();
+					query.setStartTime(stored_timestamp + 1L);
+					query.setTimeSeries(metric, tags, Aggregators.SUM, false);
+					DataPoints[] data_points = (DataPoints[]) query.runAsync().join();
+					
+					for(DataPoints dps : data_points){
+						int size = dps.aggregatedSize();
+						log.info("got results = " + dps);
+						for(int i = size-1; i >= 0; i--) {
+							ArrayList<Double> new_points = new ArrayList<Double>();
+							long latest_timestamp = 0L;
+							long row_point_timestamp = dps.timestamp(i);
+							row_point_timestamp /= 1000L; // convert from ms to sec
+							log.info("row_point_timestamp = " + row_point_timestamp);
+							log.info("stored_timestamp = " + stored_timestamp);
+							if (row_point_timestamp > stored_timestamp) {
+								log.info("updating!!!!!!");
+								if (i == size-1) { // updated stored timestamp with latest timestamp
+									latest_timestamp = row_point_timestamp;
+									updateTimeRow(row, latest_timestamp);
+									log.info("updated latest stored time to " + row_point_timestamp);
+								}
+								long value = dps.longValue(i);
+								new_points.add((double)value);
+								log.info("added to queue" + (double) value);
+								String row_key = getTrendsRowKey(metric, tags);
+								updateTrendsRow(row_key, qualifier, new_points);
+							} else {
+								break;
 							}
-							long value = bytesToLong(kv.value());
-							new_points.add((double)value);
-							log.info("added to queue" + (double) value);
-							String row_key = getTrendsRowKey(metric, tags);
-							updateTrendsRow(row_key, qualifier, new_points);
-						} else {
-							break;
+							
 						}
 					}
-					
 				}
 			}
 		} catch (Exception e) {
@@ -383,7 +387,6 @@ public class TrendAnalysis {
 				} 
 				return trend;
 			} catch (Exception e) {
-				e.printStackTrace();
 				log.info("ERROR: cannot get trends");
 				return 0;
 			}
