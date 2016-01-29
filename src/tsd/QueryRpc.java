@@ -358,7 +358,6 @@ final class QueryRpc implements HttpRpc {
    * @throws BadRequestException if parsing was unsuccessful
    */
   private TSQuery parseQuery(final TSDB tsdb, final HttpQuery query) {
-  	LOG.info("parseQuery !!!!!!!!!!!!!");
     final TSQuery data_query = new TSQuery();
     
     data_query.setStart(query.getRequiredQueryStringParam("start"));
@@ -400,7 +399,6 @@ final class QueryRpc implements HttpRpc {
     }
     
     if (query.hasQueryStringParam("show_trends")) {
-    	LOG.info("has trends query string param");
     	data_query.setShowTrends(true);
     }
     

@@ -670,24 +670,24 @@ class HttpJsonSerializer extends HttpSerializer {
           		json.writeNumberField(Long.toString(timestamp), mean);
           	}
           	json.writeEndObject();
+          
+
+	        	json.writeFieldName("standard_deviation");
+	        	json.writeStartObject();
+	        	for (final DataPoint dp : dps) {
+	        		if (dp.timestamp() < (data_query.startTime()) || 
+	                dp.timestamp() > (data_query.endTime())) {
+	              continue;
+	            }
+	        		final long timestamp = data_query.getMsResolution() ? 
+	                dp.timestamp() : dp.timestamp() / 1000;
+	            final double mean = TrendAnalysis.getTrendForTimestamp(dps.metricName(),
+	            		dps.getTags(), dp.timestamp(), "standard_deviation");
+	        		json.writeNumberField(Long.toString(timestamp), mean);
+	        	}
+	        	json.writeEndObject();
+	        	json.writeEndObject();
           }
-
-        	json.writeFieldName("standard_deviation");
-        	json.writeStartObject();
-        	for (final DataPoint dp : dps) {
-        		if (dp.timestamp() < (data_query.startTime()) || 
-                dp.timestamp() > (data_query.endTime())) {
-              continue;
-            }
-        		final long timestamp = data_query.getMsResolution() ? 
-                dp.timestamp() : dp.timestamp() / 1000;
-            final double mean = TrendAnalysis.getTrendForTimestamp(dps.metricName(),
-            		dps.getTags(), dp.timestamp(), "standard_deviation");
-        		json.writeNumberField(Long.toString(timestamp), mean);
-        	}
-        	json.writeEndObject();
-          json.writeEndObject();
-
           // close the results for this particular query
           json.writeEndObject();
         }
