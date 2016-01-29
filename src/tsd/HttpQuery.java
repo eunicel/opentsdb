@@ -156,13 +156,11 @@ final class HttpQuery {
 
   /** Returns the HTTP method/verb for the request */
   public HttpMethod method() {
-  	LOG.info("HttpQuery method!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     return this.method;
   }
 
   /** Returns the response object, allowing serializers to set headers */
   public DefaultHttpResponse response() {
-  	LOG.info("HttpQuery response!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     return this.response;
   }
 
@@ -211,7 +209,6 @@ final class HttpQuery {
    * Returns the query string parameters passed in the URI.
    */
   public Map<String, List<String>> getQueryString() {
-  	LOG.info("HttpQuery get query string!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     if (querystring == null) {
       try {
         querystring = new QueryStringDecoder(request.getUri()).getParameters();
